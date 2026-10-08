@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification Project Tracker</title>
+<link rel="stylesheet" href="assets/tracker.css?v=3.0.0">
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <div class="brand">
+      <h1><a class="brand-link" href="#" onclick="goHome(); return false;">Certification Project Tracker</a></h1>
+      <p class="sub">View only</p>
+    </div>
+    <div class="head-tools">
+      <div class="search-wrap" role="search">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="search-input" type="search" placeholder="Search customers, SNs, activities, regulations" aria-label="Search the tracker" autocomplete="off" aria-controls="search-suggest" aria-expanded="false">
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <div class="search-suggest" id="search-suggest" role="listbox" aria-label="Your frequent searches" hidden></div>
+      </div>
+      <button class="icon-btn" id="settings-btn" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+  </header>
+
+  <div class="summary-area">
+    <div class="summary" id="summary" aria-label="Summary"></div>
+    <div class="summary-foot">
+      <div class="summary-note" id="summary-note"></div>
+      <span id="summary-tools"></span>
+    </div>
+  </div>
+
+  <div id="sync-banner" class="sync-banner" style="display:none;"></div>
+
+  <div id="list"><div class="loading">Loading&hellip;</div></div>
+  <div class="version-footer"><a href="changelog.html" title="Change log">v3.0.0</a></div>
+</div>
+
+<div class="modal-bg" id="settings-modal-bg">
+  <div class="modal">
+    <h3>Sign in to edit</h3>
+    <p style="font-size:13px;color:var(--ink-soft);margin-top:-8px;">Enter your editor key: a GitHub fine-grained token for the <strong>Certification-Tracker / tracker-data</strong> repo with Contents set to read and write. It's kept only in this browser and never saved to the repo.</p>
+    <div class="field">
+      <label for="s-token">Editor key</label>
+      <input id="s-token" type="password" placeholder="github_pat_..." autocomplete="off">
+    </div>
+    <div class="err" id="settings-err" style="display:none;"></div>
+    <div class="modal-actions">
+      <button id="signout-btn" class="danger-link" type="button" title="Remove the viewer and editor keys from this browser">Sign out of this browser</button>
+      <span style="flex:1"></span>
+      <button id="settings-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="settings-save-btn">Connect &amp; open editor</button>
+    </div>
+  </div>
+</div>
+<script src="assets/tracker.js?v=3.0.0"></script>
+<script>
+// View-only page: needs a read-only key for the private data repo. Shared code is in assets/tracker.js.
+
+// The viewer key (read-only), or the editor key if this browser is signed in to edit.
+function storedViewKey(){
+  try{ return localStorage.getItem(VIEW_KEY) || (loadSettings() || {}).token || ''; }catch(e){ return ''; }
+}
+
+const ghConfig = {...DATA_REPO, token: storedViewKey()};
+
+function saveSettings(cfg){
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(cfg));
+}
+
+// Checks a key against the data repo. Returns {problem, canWrite}.
+async function checkKey(token){
+  let res;
+  try{
+    res = await fetch(`https://api.github.com/repos/${DATA_REPO.owner}/${DATA_REPO.repo}`, {headers: {
+      'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Authorization': 'Bearer ' + token}});
+  }catch(e){
+    return {problem: 'Could not reach GitHub. Check your connection and try again.'};
+  }
+  if(res.status === 401) return {problem: 'GitHub rejected this key. It may have expired or been revoked.'};
+  if(res.status === 403) return {problem: 'GitHub refused access with this key (403). It may be rate-limited or blocked by the organization\'s settings.'};
+  if(res.status === 404) return {problem: "This key can't open the tracker's data. Check it was made for the Certification-Tracker organization with access to tracker-data."};
+  if(!res.ok) return {problem: `GitHub check failed (${res.status}).`};
+  const repo = await res.json();
+  return {problem: '', canWrite: !!(repo.permissions && repo.permissions.push)};
+}
+
+// ---- Access key screen (first visit, or when the key stops working) ----
+function showGate(message){
+  hideBanner();
+  document.getElementById('list').innerHTML = `
+    <div class="gate">
+      <h2>Access key</h2>
+      <p>The tracker's data is private. Enter the access key you were given. It's kept in this browser so you only need to do this once.</p>
+      <input id="gate-key" type="password" placeholder="github_pat_..." autocomplete="off">
+      <div class="err" id="gate-err" style="${message ? '' : 'display:none;'}">${escapeHtml(message || '')}</div>
+      <div class="gate-actions"><button class="btn-primary" id="gate-btn" type="button">Open tracker</button></div>
+    </div>`;
+  const input = document.getElementById('gate-key');
+  const go = async () => {
+    const key = input.value.trim();
+    const err = document.getElementById('gate-err');
+    if(!key){ err.textContent = 'Enter your access key.'; err.style.display = 'block'; return; }
+    const btn = document.getElementById('gate-btn');
+    btn.disabled = true; btn.textContent = 'Checking\u2026';
+    const {problem} = await checkKey(key);
+    btn.disabled = false; btn.textContent = 'Open tracker';
+    if(problem){ err.textContent = problem; err.style.display = 'block'; return; }
+    try{ localStorage.setItem(VIEW_KEY, key); }catch(e){}
+    ghConfig.token = key;
+    load();
+  };
+  document.getElementById('gate-btn').addEventListener('click', go);
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') go(); });
+  input.focus();
+}
+
+// ---- Sign-in to the editor (admin/project-management.html) ----
+function showSettingsError(msg){
+  const el = document.getElementById('settings-err');
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function openSettings(message){
+  document.getElementById('s-token').value = (loadSettings() || {}).token || '';
+  showSettingsError(message || '');
+  document.getElementById('settings-modal-bg').classList.add('open');
+  document.getElementById('s-token').focus();
+}
+
+function closeSettings(){
+  document.getElementById('settings-modal-bg').classList.remove('open');
+}
+
+document.getElementById('settings-btn').addEventListener('click', () => openSettings());
+document.getElementById('settings-cancel-btn').addEventListener('click', closeSettings);
+document.getElementById('settings-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'settings-modal-bg') closeSettings();
+});
+
+document.getElementById('signout-btn').addEventListener('click', () => {
+  if(!confirm('Remove the access and editor keys from this browser?\n\nYou will need to enter a key again to open the tracker.')) return;
+  try{ localStorage.removeItem(VIEW_KEY); localStorage.removeItem(SETTINGS_KEY); }catch(e){}
+  location.href = location.pathname;
+});
+
+document.getElementById('settings-save-btn').addEventListener('click', async () => {
+  const token = document.getElementById('s-token').value.trim();
+  if(!token){ showSettingsError('Enter your editor key.'); return; }
+  const btn = document.getElementById('settings-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Checking\u2026';
+  showSettingsError('');
+  const {problem, canWrite} = await checkKey(token);
+  btn.disabled = false;
+  btn.textContent = 'Connect & open editor';
+  if(problem){ showSettingsError(problem); return; }
+  if(!canWrite){ showSettingsError('This key can read the tracker but not save changes. Use your editor key (Contents: read and write).'); return; }
+  saveSettings({...DATA_REPO, token});
+  location.href = 'admin/project-management.html' + location.hash;
+});
+
+// Arriving from the editor (no credentials, or the saved key was rejected)
+(function(){
+  const params = new URLSearchParams(location.search);
+  if(params.get('settings') === '1'){
+    openSettings(params.get('reason') === 'rejected'
+      ? 'GitHub rejected the saved editor key. Enter a valid key to open the editor.'
+      : '');
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+})();
+
+async function load(){
+  if(!ghConfig.token){ showGate(); return; }
+  try{
+    showBanner('info', 'Loading from GitHub&hellip;');
+    const remote = await fetchFromGitHub();
+    if(remote === null){
+      certs = [];
+      showBanner('error', 'No data file found at that path yet.');
+    }else{
+      certs = remote;
+      hideBanner();
+    }
+  }catch(e){
+    if(e.status === 401 || e.status === 404){
+      // The key expired, was revoked, or can't see the data repo.
+      try{ localStorage.removeItem(VIEW_KEY); }catch(err){}
+      ghConfig.token = '';
+      showGate(e.status === 401 ? 'Your access key has expired or been revoked. Enter a new one.' : "Your access key can't open the tracker's data. Enter a different key.");
+      return;
+    }
+    showBanner('error', 'Could not load from GitHub: ' + escapeHtml(e.message));
+    certs = [];
+  }
+  document.getElementById('list').innerHTML = '';
+  render();
+  loadLibrary();
+}
+
+// ---- Keeping the page up to date ----
+// Check GitHub again when this tab is selected (at most every 5 seconds).
+async function refreshFromGitHub(){
+  if(Date.now() - lastFetchAt < 5000) return;
+  const prevSha = currentSha;
+  try{
+    const remote = await fetchFromGitHub();
+    if(remote && currentSha !== prevSha){
+      certs = remote;
+      hideBanner();
+      render();
+    }
+  }catch(e){ /* keep showing what's already loaded */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') refreshFromGitHub();
+});
+
+window.addEventListener('focus', refreshFromGitHub);
+
+// When the editor saves in another tab of this browser, show the new data straight away.
+const SYNC_KEY = `${ghConfig.owner}/${ghConfig.repo}@${ghConfig.branch}:${ghConfig.path}`.toLowerCase();
+
+if('BroadcastChannel' in window){
+  const syncChannel = new BroadcastChannel('cert-tracker-sync');
+  syncChannel.onmessage = (e) => {
+    const m = e.data || {};
+    if(m.type === 'saved' && m.key === SYNC_KEY && Array.isArray(m.data)){
+      certs = m.data;
+      if(m.library) library = normalizeLibrary(m.library);
+      currentSha = m.sha || currentSha;
+      hideBanner();
+      render();
+    }
+  };
+}
+
+initHeader();
+load();
+</script>
+</body>
+</html>

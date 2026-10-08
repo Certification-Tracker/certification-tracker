@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification Project Tracker — Editor</title>
+<link rel="stylesheet" href="../assets/tracker.css?v=3.0.0">
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <div class="brand">
+      <h1><a class="brand-link" href="#" onclick="goHome(); return false;">Certification Project Tracker</a></h1>
+      <p class="sub">Editor</p>
+    </div>
+    <div class="head-tools">
+      <div class="search-wrap" role="search">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="search-input" type="search" placeholder="Search customers, SNs, activities, regulations" aria-label="Search the tracker" autocomplete="off" aria-controls="search-suggest" aria-expanded="false">
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <div class="search-suggest" id="search-suggest" role="listbox" aria-label="Your frequent searches" hidden></div>
+      </div>
+      <button class="icon-btn" id="admin-btn" type="button" title="Admin" aria-label="Admin"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+  </header>
+
+  <div id="tab-note" class="sync-banner info tab-note" role="status" style="display:none;">The editor is also open in another tab. Changes saved in one tab show up in the other straight away.</div>
+
+  <div class="summary-area">
+    <div class="summary" id="summary" aria-label="Summary"></div>
+    <div class="summary-foot">
+      <div class="summary-note" id="summary-note"></div>
+      <span id="summary-tools"></span>
+    </div>
+  </div>
+
+  <div id="sync-banner" class="sync-banner" style="display:none;"></div>
+
+  <div id="list"><div class="loading">Loading&hellip;</div></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.0.0</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+</div>
+
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h3 id="modal-title">Add certification</h3>
+    <input type="hidden" id="edit-id">
+    <div class="field">
+      <label for="f-name">Certification / project name<span class="mode-tag" id="name-mode">Automatic</span></label>
+      <input id="f-name">
+      <div class="field-hint">Built from authority, level, aircraft and SIM model. Type to override; clear to go back to automatic.</div>
+      <div class="err" id="err-name">Enter a name, or fill in the authority, level or aircraft.</div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-customer">Customer</label>
+        <input id="f-customer" placeholder="e.g. Acme Corp">
+      </div>
+      <div class="field">
+        <label for="f-simlocation">SIM location</label>
+        <input id="f-simlocation" placeholder="e.g. Phoenix, AZ, USA">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-authority">Regulatory authority</label>
+        <select id="f-authority"></select>
+      </div>
+      <div class="field">
+        <label for="f-country">Certifying country</label>
+        <input id="f-country" placeholder="e.g. Qatar">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-level">Certification level</label>
+        <input id="f-level" list="level-list" placeholder="e.g. FNPT II, FTD Level 5">
+        <datalist id="level-list"></datalist>
+      </div>
+      <div class="field">
+        <label for="f-aircraft">Aircraft type</label>
+        <input id="f-aircraft" placeholder="e.g. Piper PA-28-181 Archer">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-serial">SIM serial number</label>
+        <input id="f-serial" placeholder="e.g. R-MCX-100251">
+      </div>
+      <div class="field">
+        <label for="f-model">SIM model<span class="mode-tag" id="model-mode" style="display:none;"></span></label>
+        <input id="f-model" placeholder="e.g. MCX">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-contact-name">Contact name</label>
+        <input id="f-contact-name" placeholder="e.g. Jane Smith">
+      </div>
+      <div class="field">
+        <label for="f-contact-email">Contact email</label>
+        <input id="f-contact-email" type="email" placeholder="e.g. jane@customer.com">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="f-date">Due date</label>
+        <input id="f-date" type="date">
+      </div>
+    </div>
+    <h4 class="modal-subhead" id="qual-head">Qualification</h4>
+    <div class="field-row">
+      <div class="field">
+        <label for="q-status">Status</label>
+        <select id="q-status"><option value="">Not set</option></select>
+      </div>
+      <div class="field">
+        <label for="q-number">Certificate / LOA number</label>
+        <input id="q-number" placeholder="e.g. GBR.FSTD.0013">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="q-issue">Issued</label>
+        <input id="q-issue" type="date">
+      </div>
+      <div class="field">
+        <label for="q-expiry">Expires</label>
+        <input id="q-expiry" type="date">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="q-eval">Next evaluation</label>
+        <input id="q-eval" type="date">
+      </div>
+      <div class="field">
+        <label for="q-basis">Qualification basis</label>
+        <select id="q-basis"><option value="">Not set</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="q-conditions">Conditions</label>
+      <textarea id="q-conditions" rows="3" placeholder="Conditions attached to the qualification, with any deadlines"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button id="cancel-btn">Cancel</button>
+      <button class="btn-primary" id="save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="confirm-modal-bg">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <h3 id="confirm-title">Delete this certification?</h3>
+    <div id="confirm-body"></div>
+    <div class="modal-actions">
+      <button id="confirm-cancel-btn">Cancel</button>
+      <button class="btn-danger" id="confirm-delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Delete certification</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="changelog-modal-bg">
+  <div class="modal">
+    <h3 id="changelog-modal-title">Add change log entry</h3>
+    <input type="hidden" id="changelog-cert-id">
+    <input type="hidden" id="changelog-edit-id">
+    <div class="field">
+      <label for="l-date">Date</label>
+      <input id="l-date" type="date">
+    </div>
+    <div class="field">
+      <label for="l-text">Entry</label>
+      <textarea id="l-text" placeholder="e.g. Document updated: MQTG v1.3"></textarea>
+      <div class="err" id="changelog-err" style="display:none;"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="changelog-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="changelog-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="activity-modal-bg">
+  <div class="modal">
+    <h3 id="activity-modal-title">Add activity</h3>
+    <input type="hidden" id="activity-cert-id">
+    <input type="hidden" id="activity-edit-id">
+    <div class="field">
+      <label for="a-description">Description</label>
+      <textarea id="a-description" placeholder="What needs to happen"></textarea>
+      <div class="err" id="activity-err" style="display:none;">Enter a description.</div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="a-status">Status</label>
+        <select id="a-status">
+          <option value="Not Started">Not Started</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Waiting">Waiting</option>
+          <option value="Complete">Complete</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="a-due">Due date</label>
+        <input id="a-due" type="date">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="activity-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="activity-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="document-modal-bg">
+  <div class="modal">
+    <h3 id="document-modal-title">Add document</h3>
+    <input type="hidden" id="document-cert-id">
+    <input type="hidden" id="document-edit-id">
+    <div class="field">
+      <label for="d-name">Document name</label>
+      <input id="d-name" placeholder="e.g. MQTG v1.1.docx">
+      <div class="err" id="document-err" style="display:none;">Enter a document name.</div>
+    </div>
+    <div class="field">
+      <label for="d-url">Download URL (optional)</label>
+      <input id="d-url" placeholder="e.g. https://drive.google.com/file/d/...">
+    </div>
+    <div class="field">
+      <label for="d-location">Document location (network path or a Google Drive link)</label>
+      <input id="d-location" placeholder="e.g. G:\Shared drives\Certification\... or https://drive.google.com/...">
+    </div>
+    <div class="modal-actions">
+      <button id="document-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="document-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="lib-modal-bg">
+  <div class="modal">
+    <h3 id="lib-modal-title">Add document</h3>
+    <input type="hidden" id="lib-edit-id">
+    <div class="field-row">
+      <div class="field">
+        <label for="l-authority">Authority</label>
+        <input id="l-authority" list="l-authorities" placeholder="e.g. FAA, EASA, UK CAA">
+        <datalist id="l-authorities"></datalist>
+      </div>
+      <div class="field">
+        <label for="l-title">Title</label>
+        <input id="l-title" placeholder="e.g. CS-FSTD(A)">
+      </div>
+    </div>
+    <div class="field">
+      <label for="l-full">Full title</label>
+      <input id="l-full" placeholder="e.g. Certification Specifications for Aeroplane Flight Simulation Training Devices">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="l-revision">Issue or revision</label>
+        <input id="l-revision" placeholder="e.g. Issue 2">
+      </div>
+      <div class="field">
+        <label for="l-asof">Copy as of</label>
+        <input id="l-asof" type="date">
+      </div>
+    </div>
+    <div class="field">
+      <label for="l-file">PDF file name</label>
+      <input id="l-file" placeholder="e.g. EASA-CS-FSTD-A-Issue-2.pdf">
+      <div class="field-hint">Upload the PDF to the data repo's (tracker-data) regs/ folder, then enter its file name here. Saving builds its search index.</div>
+    </div>
+    <div class="field">
+      <label for="l-url">Official source link</label>
+      <input id="l-url" type="url" placeholder="https://">
+    </div>
+    <div class="err" id="lib-err">Authority, title and PDF file name are required.</div>
+    <div class="modal-actions">
+      <button id="lib-cancel-btn" type="button">Cancel</button>
+      <button class="btn-primary" id="lib-save-btn" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="admin-modal-bg">
+  <div class="modal">
+    <h3>Admin</h3>
+    <div class="admin-section">
+      <h4>Search history</h4>
+      <p>Each person's suggested searches come from their own search history, kept in their browser. Clearing it here starts everyone fresh the next time they open the tracker.</p>
+      <button class="btn-danger" id="admin-clear-btn" type="button">Clear everyone's search history</button>
+      <p class="muted" id="admin-reset-date" style="margin-top:8px;"></p>
+    </div>
+    <div class="admin-section">
+      <h4>Most searched (your searches in the editor)</h4>
+      <p>Collected to build a shared suggested-searches list in a future update.</p>
+      <div id="admin-tally"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="admin-close-btn" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>window.TRACKER_EDITOR = true;</script>
+<script src="../assets/tracker.js?v=3.0.0"></script>
+<script>
+// Editor: everything specific to editing. Shared code is in ../assets/tracker.js.
+
+let addingComment = false;
+
+let saving = false;
+let localVersion = 0;
+let ghConfig = null;
+
+// Sign-in lives on the view-only page (../index.html, one folder up); send the user there when
+// there are no saved credentials or GitHub rejects them.
+function redirectToSignIn(reason){
+  location.replace('../index.html?settings=1' + (reason ? '&reason=' + encodeURIComponent(reason) : '') + location.hash);
+}
+
+// UTF-8 safe base64 encode/decode
+function b64EncodeUtf8(str){
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// =====================================================================
+// GitHub writes (editor only)
+// =====================================================================
+// Writes a file to the repo and returns its new SHA. sha = the version being replaced (null for a new file).
+async function ghWriteFile(path, text, sha, message){
+  const body = {message, content: b64EncodeUtf8(text), branch: ghConfig.branch};
+  if(sha) body.sha = sha;
+  const res = await fetch(ghApiUrl(path), {
+    method: 'PUT',
+    headers: {...ghHeaders(), 'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    const errBody = await res.text();
+    if(res.status === 401 || res.status === 403){
+      throw new Error('GitHub rejected the saved token. <a href="../index.html?settings=1&reason=rejected">Reconnect from the view-only page</a>, then try again.');
+    }
+    if(res.status === 409){
+      throw new Error('Conflict: the file changed on GitHub since last load. Refresh the page to get the latest version before saving again.');
+    }
+    throw new Error(`GitHub write failed (${res.status}): ${errBody.slice(0, 300)}`);
+  }
+  return (await res.json()).content.sha;
+}
+
+// SHA of a file in the repo, or null if it doesn't exist (works for large files too).
+async function ghFileSha(path){
+  const res = await fetch(ghApiUrl(path) + `?ref=${encodeURIComponent(ghConfig.branch)}`, {
+    headers: {...ghHeaders(), 'Accept': 'application/vnd.github.object+json'}, cache: 'no-cache'
+  });
+  if(res.status === 404) return null;
+  if(!res.ok) throw new Error(`GitHub read failed (${res.status})`);
+  return (await res.json()).sha;
+}
+
+async function writeToGitHub(data, message){
+  currentSha = await ghWriteFile(ghConfig.path, JSON.stringify(wrapCerts(data), null, 2), currentSha, message || 'Update certification tracker data');
+}
+
+async function writeLibrary(message){
+  library.searchTally = mergedTally();
+  librarySha = await ghWriteFile(libraryPath(), JSON.stringify(library, null, 2), librarySha, message);
+  clearPendingTally();
+}
+
+async function persistLibrary(message, successText){
+  saving = true;
+  try{
+    showBanner('info', 'Saving to GitHub&hellip;');
+    await writeLibrary(message);
+    broadcastSaved();
+    showBanner('success', successText || 'Saved to GitHub.');
+    setTimeout(hideBanner, 2000);
+    return true;
+  }catch(e){
+    const msg = e.message.startsWith('GitHub rejected the saved token.') ? e.message : escapeHtml(e.message);
+    showBanner('error', 'Save failed: ' + msg);
+    return false;
+  }finally{
+    saving = false;
+  }
+}
+
+// =====================================================================
+// Regulatory library: add, edit, delete, and build each document's search index
+// =====================================================================
+function slugify(s){
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'doc';
+}
+
+function openLibraryModal(docId){
+  const d = docId ? libraryDoc(docId) : null;
+  document.getElementById('lib-modal-title').textContent = d ? 'Edit document' : 'Add document';
+  document.getElementById('lib-edit-id').value = d ? d.id : '';
+  const set = (id, v) => { document.getElementById(id).value = v || ''; };
+  set('l-authority', d && d.authority);
+  set('l-title', d && d.title);
+  set('l-full', d && d.fullTitle);
+  set('l-revision', d && d.revision);
+  set('l-asof', d && d.asOf);
+  set('l-file', d && d.file);
+  set('l-url', d && d.officialUrl);
+  document.getElementById('l-authorities').innerHTML = libraryAuthorities().map(a => `<option value="${escapeHtml(a)}">`).join('');
+  document.getElementById('lib-err').style.display = 'none';
+  document.getElementById('lib-modal-bg').classList.add('open');
+  document.getElementById(d ? 'l-title' : 'l-authority').focus();
+}
+
+function closeLibraryModal(){
+  document.getElementById('lib-modal-bg').classList.remove('open');
+}
+
+async function saveLibraryDoc(){
+  const val = id => document.getElementById(id).value.trim();
+  const entry = {
+    authority: val('l-authority'), title: val('l-title'), fullTitle: val('l-full'), revision: val('l-revision'),
+    asOf: /^\d{4}-\d{2}-\d{2}$/.test(val('l-asof')) ? val('l-asof') : '',
+    file: val('l-file').replace(/^.*\//, ''), officialUrl: val('l-url')
+  };
+  if(!entry.authority || !entry.title || !entry.file){
+    document.getElementById('lib-err').style.display = 'block';
+    return;
+  }
+  if(entry.officialUrl && !/^https?:\/\//i.test(entry.officialUrl)) entry.officialUrl = 'https://' + entry.officialUrl;
+  const editId = document.getElementById('lib-edit-id').value;
+  let doc;
+  if(editId){
+    doc = libraryDoc(editId);
+    const fileChanged = doc.file !== entry.file;
+    Object.assign(doc, entry);
+    if(fileChanged){ doc.indexed = false; doc.pages = 0; }
+  }else{
+    let id = slugify(entry.authority + ' ' + entry.title + ' ' + entry.revision), n = 2;
+    while(libraryDoc(id)) id = slugify(entry.authority + ' ' + entry.title + ' ' + entry.revision) + '-' + (n++);
+    doc = {id, ...entry, indexed: false, pages: 0};
+    library.documents.push(doc);
+  }
+  closeLibraryModal();
+  expandedAuthorities.add(doc.authority);
+  if(!await persistLibrary(`Library: ${editId ? 'update' : 'add'} ${docTitle(doc)}`)) return;
+  navigate({type: 'reg', id: doc.id, page: 1});
+  if(!doc.indexed) rebuildIndex(doc.id);
+}
+
+async function deleteLibraryDoc(id){
+  const d = libraryDoc(id);
+  if(!d || !confirm(`Remove ${docTitle(d)} from the library?\n\nThe PDF itself stays in the data repo's regs/ folder; delete it there if you no longer need it.`)) return;
+  library.documents = library.documents.filter(x => x.id !== id);
+  delete regIndex[id];
+  delete regIndexRaw[id];
+  if(!await persistLibrary(`Library: remove ${docTitle(d)}`, 'Removed from the library.')) return;
+  // Tidy up its search index (best effort).
+  try{
+    const path = 'regs/index/' + id + '.json';
+    const sha = await ghFileSha(path);
+    if(sha){
+      await fetch(ghApiUrl(path), {method: 'DELETE', headers: {...ghHeaders(), 'Content-Type': 'application/json'},
+        body: JSON.stringify({message: `Library: remove search index for ${docTitle(d)}`, sha, branch: ghConfig.branch})});
+    }
+  }catch(e){}
+  goHome();
+}
+
+// Reads the PDF's text page by page with PDF.js (Mozilla's PDF reader) and saves it as
+// regs/index/<id>.json, which the search uses.
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+let pdfjsReady = null;
+
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(!pdfjsReady){
+    pdfjsReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_URL;
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace('pdf.min.js', 'pdf.worker.min.js');
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => { pdfjsReady = null; reject(new Error('Could not load the PDF reader. Check your connection and try again.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsReady;
+}
+
+async function rebuildIndex(id){
+  const d = libraryDoc(id);
+  if(!d) return;
+  saving = true;
+  try{
+    showBanner('info', `Building the search index for ${escapeHtml(docTitle(d))}&hellip;`);
+    const pdfjs = await loadPdfJs();
+    let res;
+    try{ res = await ghRaw('regs/' + d.file); }
+    catch(err){ throw new Error(err.status === 404 ? `regs/${d.file} isn't in the data repo yet. Upload the PDF to tracker-data's regs/ folder, then click Rebuild search index.` : err.message); }
+    const pdf = await pdfjs.getDocument({data: new Uint8Array(await res.arrayBuffer())}).promise;
+    const pages = [];
+    for(let p = 1; p <= pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim());
+      if(p % 10 === 0) showBanner('info', `Building the search index for ${escapeHtml(docTitle(d))}: page ${p} of ${pdf.numPages}&hellip;`);
+    }
+    const path = 'regs/index/' + d.id + '.json';
+    await ghWriteFile(path, JSON.stringify({id: d.id, pages}), await ghFileSha(path), `Library: search index for ${docTitle(d)}`);
+    d.pages = pdf.numPages;
+    d.indexed = true;
+    delete regIndex[d.id];
+    delete regIndexRaw[d.id];
+    await writeLibrary(`Library: ${docTitle(d)} indexed`);
+    broadcastSaved();
+    showBanner('success', `Search index built: ${countLabel(pdf.numPages, 'page', 'pages')}.`);
+    setTimeout(hideBanner, 5000);
+  }catch(e){
+    showBanner('error', 'Search index not built: ' + (e.message.startsWith('GitHub rejected') ? e.message : escapeHtml(e.message)));
+  }finally{
+    saving = false;
+    lastDetailHtml = null;
+    render();
+  }
+}
+
+// =====================================================================
+// Search tally (editor only): your searches are counted in data/library.json, to build a shared
+// suggested-searches list in a future update. Saved with your next save, or at most once an hour.
+// =====================================================================
+const TALLY_KEY = 'cert-tracker-search-tally-pending';
+const TALLY_FLUSH_MS = 60 * 60 * 1000;
+
+function pendingTally(){
+  try{ return JSON.parse(localStorage.getItem(TALLY_KEY) || 'null') || {terms: {}, since: Date.now()}; }catch(e){ return {terms: {}, since: Date.now()}; }
+}
+
+function tallySearch(term){
+  const p = pendingTally();
+  if(!Object.keys(p.terms).length) p.since = Date.now();
+  p.terms[term] = (p.terms[term] || 0) + 1;
+  try{ localStorage.setItem(TALLY_KEY, JSON.stringify(p)); }catch(e){}
+}
+
+function mergedTally(){
+  const merged = {...(library.searchTally || {})};
+  Object.entries(pendingTally().terms).forEach(([k, n]) => { merged[k] = (merged[k] || 0) + n; });
+  return merged;
+}
+
+function clearPendingTally(){
+  try{ localStorage.removeItem(TALLY_KEY); }catch(e){}
+}
+
+async function flushTallyIfDue(){
+  const p = pendingTally();
+  if(!Object.keys(p.terms).length || saving || !libraryLoaded) return;
+  if(Date.now() - (p.since || 0) < TALLY_FLUSH_MS) return;
+  try{ await writeLibrary('Library: search tally'); }catch(e){ /* try again later */ }
+}
+setInterval(flushTallyIfDue, 5 * 60 * 1000);
+
+// ---- Admin panel (gear in the header) ----
+function openAdmin(){
+  const top = Object.entries(mergedTally()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  document.getElementById('admin-tally').innerHTML = top.length
+    ? `<ol class="tally-list">${top.map(([t, n]) => `<li>${escapeHtml(t)} <span class="muted">(${n})</span></li>`).join('')}</ol>`
+    : '<p class="muted">No searches counted yet.</p>';
+  document.getElementById('admin-reset-date').textContent = library.searchResetAt ? 'Last cleared ' + new Date(library.searchResetAt).toLocaleString() : '';
+  document.getElementById('admin-modal-bg').classList.add('open');
+}
+
+function closeAdmin(){
+  document.getElementById('admin-modal-bg').classList.remove('open');
+}
+
+async function clearAllSearchHistory(){
+  if(!confirm("Clear everyone's search history?\n\nEach person's suggested searches start fresh the next time they open the tracker. The search tally used for future shared suggestions is kept.")) return;
+  library.searchResetAt = new Date().toISOString();
+  try{ localStorage.removeItem(SEARCH_HISTORY_KEY); }catch(e){}
+  closeAdmin();
+  await persistLibrary('Library: clear search history', "Everyone's search history has been cleared.");
+}
+
+async function persist(){
+  if(!ghConfig){
+    showBanner('error', 'Not connected to GitHub. <a href="../index.html?settings=1">Connect from the view-only page</a>.');
+    return;
+  }
+  saving = true;
+  localVersion++;
+  try{
+    showBanner('info', 'Saving to GitHub&hellip;');
+    await writeToGitHub(certs);
+    // Search tally waiting to be saved goes along with this save.
+    if(libraryLoaded && Object.keys(pendingTally().terms).length){ try{ await writeLibrary('Library: search tally'); }catch(e){} }
+    broadcastSaved();
+    showBanner('success', 'Saved to GitHub.');
+    setTimeout(hideBanner, 2000);
+  }catch(e){
+    const msg = e.message.startsWith('GitHub rejected the saved token.') ? e.message : escapeHtml(e.message);
+    showBanner('error', 'Save failed: ' + msg);
+  }finally{
+    saving = false;
+  }
+}
+
+async function load(){
+  const saved = loadSettings();
+  if(!saved || !saved.token){
+    redirectToSignIn();
+    return;
+  }
+  ghConfig = {...DATA_REPO, token: saved.token};
+  try{
+    showBanner('info', 'Loading from GitHub&hellip;');
+    const remote = await fetchFromGitHub();
+    let needsResave = false;
+    if(remote === null){
+      // First time: start an empty data file.
+      certs = [];
+      currentSha = null;
+      needsResave = true;
+    }else{
+      certs = remote;
+    }
+    certs.forEach((c, ci) => {
+      if(c.primaryContact !== undefined && c.contactName === undefined && c.contactEmail === undefined){
+        const sc = splitContact(c.primaryContact);
+        c.contactName = sc.name;
+        c.contactEmail = sc.email;
+        delete c.primaryContact;
+        needsResave = true;
+      }
+      if(!Array.isArray(c.activityLog)) c.activityLog = [];
+      const today = new Date().toISOString().slice(0,10);
+      // Migrate legacy {date, text} activity entries to the new shape.
+      c.activityLog.forEach((a, idx) => {
+        if(a.description === undefined){
+          c.activityLog[idx] = {
+            id: a.id || ('a' + Date.now() + ci + idx),
+            description: a.text || '',
+            status: 'Complete',
+            dateCreated: a.date || today,
+            dateDue: '',
+            dateUpdated: a.date || today,
+            dateCompleted: a.date || today
+          };
+          needsResave = true;
+        }else{
+          if(!a.id){ a.id = 'a' + Date.now() + ci + idx; needsResave = true; }
+          if(!a.status){ a.status = 'Complete'; needsResave = true; }
+          if(a.status === 'Pending'){ a.status = 'Not Started'; needsResave = true; }
+          if(a.status === 'Complete' && !a.dateCompleted){
+            a.dateCompleted = a.dateUpdated || a.dateCreated || today;
+            needsResave = true;
+          }
+        }
+      });
+      // Fold any leftover "Next task" text into a new Not Started activity.
+      if(c.change && c.change.trim()){
+        c.activityLog.push({
+          id: 'a' + Date.now() + ci + '-migrated',
+          description: c.change.trim(),
+          status: 'Not Started',
+          dateCreated: today,
+          dateDue: '',
+          dateUpdated: today
+        });
+        c.change = '';
+        needsResave = true;
+      }
+      if(!Array.isArray(c.docChangeLog)){ c.docChangeLog = []; needsResave = true; }
+      c.docChangeLog.forEach((e, ei) => {
+        if(!e.id){ e.id = 'l' + Date.now() + ci + '-' + ei; needsResave = true; }
+      });
+      if(Array.isArray(c.docs)){
+        const normalized = c.docs.map(d => typeof d === 'string' ? {name: d, url: ''} : d);
+        const isDifferent = normalized.some((d, i) => typeof c.docs[i] === 'string');
+        if(isDifferent){ c.docs = normalized; needsResave = true; }
+        c.docs.forEach((d, di) => {
+          if(!d.id){ d.id = 'd' + Date.now() + ci + di; needsResave = true; }
+        });
+      }else{
+        c.docs = [];
+        needsResave = true;
+      }
+    });
+    if(needsResave){
+      showBanner('info', remote === null ? 'No data file found yet \u2014 creating one&hellip;' : 'Updating data format&hellip;');
+      await writeToGitHub(certs, remote === null ? 'Initialize certification tracker data' : 'Update tracker data format');
+      showBanner('success', remote === null ? 'Created data file in your repo.' : 'Data updated.');
+      setTimeout(hideBanner, 2500);
+    }else{
+      hideBanner();
+    }
+  }catch(e){
+    if(e.status === 401 || e.status === 403){
+      redirectToSignIn('rejected');
+      return;
+    }
+    showBanner('error', 'Could not load from GitHub: ' + escapeHtml(e.message));
+    certs = [];
+  }
+  render();
+  loadLibrary();
+}
+
+let logIdCounter = 0;
+function newLogId(){
+  return 'l' + Date.now() + '-' + (logIdCounter++);
+}
+
+function nowTime(){
+  return new Date().toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+}
+
+async function addComment(certId, activityId){
+  if(addingComment) return;
+  const box = document.getElementById('cmt-' + activityId);
+  const text = box ? box.value.trim() : '';
+  if(!text){
+    const err = document.getElementById('cmt-err-' + activityId);
+    if(err) err.style.display = 'block';
+    return;
+  }
+  const c = certs.find(x => x.id === certId);
+  const a = c && Array.isArray(c.activityLog) ? c.activityLog.find(x => x.id === activityId) : null;
+  if(!a) return;
+  if(!Array.isArray(a.comments)) a.comments = [];
+  a.comments.push({
+    id: 'k' + Date.now(),
+    text,
+    date: new Date().toISOString().slice(0,10),
+    time: nowTime()
+  });
+  delete commentDrafts[certId + '|' + activityId];
+  openThreads.add(activityId);
+  addingComment = true;
+  try{ await persist(); }finally{ addingComment = false; }
+  render();
+}
+
+async function deleteComment(certId, activityId, commentId){
+  if(!confirm('Delete this comment? This can\'t be undone.')) return;
+  const c = certs.find(x => x.id === certId);
+  const a = c && Array.isArray(c.activityLog) ? c.activityLog.find(x => x.id === activityId) : null;
+  if(!a || !Array.isArray(a.comments)) return;
+  a.comments = a.comments.filter(cm => cm.id !== commentId);
+  await persist();
+  render();
+}
+
+function openActivityModal(certId, activityId){
+  document.getElementById('activity-err').style.display = 'none';
+  document.getElementById('activity-cert-id').value = certId;
+  document.getElementById('activity-edit-id').value = activityId || '';
+  const title = document.getElementById('activity-modal-title');
+  if(activityId){
+    const c = certs.find(x => x.id === certId);
+    const a = c && Array.isArray(c.activityLog) ? c.activityLog.find(x => x.id === activityId) : null;
+    title.textContent = 'Edit activity';
+    document.getElementById('a-description').value = a ? a.description : '';
+    document.getElementById('a-status').value = a ? activityStatusLabel(a.status) : 'Not Started';
+    document.getElementById('a-due').value = a ? (a.dateDue || '') : '';
+  }else{
+    title.textContent = 'Add activity';
+    document.getElementById('a-description').value = '';
+    document.getElementById('a-status').value = 'Not Started';
+    document.getElementById('a-due').value = '';
+  }
+  document.getElementById('activity-modal-bg').classList.add('open');
+  document.getElementById('activity-modal-bg').style.display = 'flex';
+  document.getElementById('a-description').focus();
+}
+
+function closeActivityModal(){
+  document.getElementById('activity-modal-bg').classList.remove('open');
+  document.getElementById('activity-modal-bg').style.display = 'none';
+}
+
+async function saveActivityEntry(){
+  const description = document.getElementById('a-description').value.trim();
+  if(!description){
+    document.getElementById('activity-err').style.display = 'block';
+    return;
+  }
+  const certId = document.getElementById('activity-cert-id').value;
+  const activityId = document.getElementById('activity-edit-id').value;
+  const today = new Date().toISOString().slice(0,10);
+  const nowT = nowTime();
+  const status = document.getElementById('a-status').value || 'Not Started';
+  const dateDueRaw = document.getElementById('a-due').value;
+  const dateDue = /^\d{4}-\d{2}-\d{2}$/.test(dateDueRaw) ? dateDueRaw : '';
+
+  const c = certs.find(x => x.id === certId);
+  if(!c) return;
+  if(!Array.isArray(c.activityLog)) c.activityLog = [];
+
+  if(activityId){
+    const idx = c.activityLog.findIndex(x => x.id === activityId);
+    if(idx > -1){
+      const prevEntry = c.activityLog[idx];
+      let dateCompleted = prevEntry.dateCompleted || '';
+      let timeCompleted = prevEntry.timeCompleted || '';
+      if(status === 'Complete' && !dateCompleted){ dateCompleted = today; timeCompleted = nowT; }
+      if(status !== 'Complete'){ dateCompleted = ''; timeCompleted = ''; }
+      const comments = Array.isArray(prevEntry.comments) ? [...prevEntry.comments] : [];
+      if(prevEntry.status === 'Complete' && status !== 'Complete'){
+        const note = reopenNote(prevEntry);
+        if(note) comments.push(note);
+      }
+      // Waiting since: the day an activity was set to Waiting (kept while it stays Waiting).
+      const waitingSince = status === 'Waiting' ? (prevEntry.status === 'Waiting' && prevEntry.waitingSince ? prevEntry.waitingSince : today) : '';
+      c.activityLog[idx] = {
+        ...prevEntry,
+        description, status, dateDue, waitingSince,
+        dateUpdated: today,
+        timeUpdated: nowT,
+        dateCompleted,
+        timeCompleted,
+        comments
+      };
+    }
+  }else{
+    c.activityLog.push({
+      id: 'a' + Date.now(),
+      description, status, dateDue,
+      waitingSince: status === 'Waiting' ? today : '',
+      dateCreated: today,
+      timeCreated: nowT,
+      dateUpdated: today,
+      timeUpdated: nowT,
+      dateCompleted: status === 'Complete' ? today : '',
+      timeCompleted: status === 'Complete' ? nowT : ''
+    });
+  }
+  // Open the group the activity is now in (except Completed, which stays folded away).
+  if(status !== 'Complete') openActivityGroups.add(activityGroupKey(certId, activityStatusLabel(status)));
+  await persist();
+  closeActivityModal();
+  render();
+}
+
+// ---- Reopening a completed activity ----
+// Adds an automatic comment so the earlier completion isn't lost.
+function reopenNote(a){
+  if(!a.dateCompleted) return null;
+  return {
+    id: 'k' + Date.now() + Math.floor(Math.random() * 1000),
+    text: `Reopened (was completed ${fmtDate(a.dateCompleted)})`,
+    date: new Date().toISOString().slice(0,10),
+    time: nowTime()
+  };
+}
+
+async function reopenActivity(certId, activityId){
+  const c = certs.find(x => x.id === certId);
+  if(!c || !Array.isArray(c.activityLog)) return;
+  const a = c.activityLog.find(x => x.id === activityId);
+  if(!a) return;
+  const note = reopenNote(a);
+  if(note){
+    if(!Array.isArray(a.comments)) a.comments = [];
+    a.comments.push(note);
+  }
+  const today = new Date().toISOString().slice(0,10);
+  a.status = 'In Progress';
+  a.waitingSince = '';
+  a.dateUpdated = today;
+  a.timeUpdated = nowTime();
+  a.dateCompleted = '';
+  a.timeCompleted = '';
+  // Show it where it has moved to.
+  openActivityGroups.add(activityGroupKey(certId, 'In Progress'));
+  await persist();
+  render();
+}
+
+async function markActivityComplete(certId, activityId){
+  const c = certs.find(x => x.id === certId);
+  if(!c || !Array.isArray(c.activityLog)) return;
+  const a = c.activityLog.find(x => x.id === activityId);
+  if(!a) return;
+  const today = new Date().toISOString().slice(0,10);
+  const nowT = nowTime();
+  a.status = 'Complete';
+  a.waitingSince = '';
+  a.dateUpdated = today;
+  a.timeUpdated = nowT;
+  a.dateCompleted = today;
+  a.timeCompleted = nowT;
+  await persist();
+  render();
+}
+
+async function deleteActivity(certId, activityId){
+  const c = certs.find(x => x.id === certId);
+  if(!c || !Array.isArray(c.activityLog)) return;
+  c.activityLog = c.activityLog.filter(a => a.id !== activityId);
+  await persist();
+  render();
+}
+
+function openChangeLogModal(certId, entryId){
+  document.getElementById('changelog-err').style.display = 'none';
+  document.getElementById('changelog-cert-id').value = certId;
+  document.getElementById('changelog-edit-id').value = entryId || '';
+  const c = certs.find(x => x.id === certId);
+  const e = entryId && c && Array.isArray(c.docChangeLog) ? c.docChangeLog.find(x => x.id === entryId) : null;
+  document.getElementById('changelog-modal-title').textContent = e ? 'Edit change log entry' : 'Add change log entry';
+  document.getElementById('l-date').value = e ? (e.date || '') : new Date().toISOString().slice(0,10);
+  document.getElementById('l-text').value = e ? (e.text || '') : '';
+  document.getElementById('changelog-modal-bg').classList.add('open');
+  document.getElementById('l-text').focus();
+}
+
+function closeChangeLogModal(){
+  document.getElementById('changelog-modal-bg').classList.remove('open');
+}
+
+async function saveChangeLogEntry(){
+  const text = document.getElementById('l-text').value.trim();
+  const date = document.getElementById('l-date').value;
+  const err = document.getElementById('changelog-err');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ err.textContent = 'Enter a date.'; err.style.display = 'block'; return; }
+  if(!text){ err.textContent = 'Enter the change log text.'; err.style.display = 'block'; return; }
+  const c = certs.find(x => x.id === document.getElementById('changelog-cert-id').value);
+  if(!c) return;
+  if(!Array.isArray(c.docChangeLog)) c.docChangeLog = [];
+  const entryId = document.getElementById('changelog-edit-id').value;
+  if(entryId){
+    const e = c.docChangeLog.find(x => x.id === entryId);
+    if(e){
+      // A recorded time only makes sense for the original date
+      if(e.date !== date){ delete e.time; }
+      e.date = date;
+      e.text = text;
+    }
+  }else{
+    c.docChangeLog.push({id: newLogId(), date, ts: Date.now(), text});
+  }
+  await persist();
+  closeChangeLogModal();
+  render();
+}
+
+async function deleteChangeLogEntry(certId, entryId){
+  const c = certs.find(x => x.id === certId);
+  if(!c || !Array.isArray(c.docChangeLog)) return;
+  const e = c.docChangeLog.find(x => x.id === entryId);
+  if(!e) return;
+  c.docChangeLog = c.docChangeLog.filter(x => x.id !== entryId);
+  await persist();
+  render();
+}
+
+function openDocumentModal(certId, docId){
+  document.getElementById('document-err').style.display = 'none';
+  document.getElementById('document-cert-id').value = certId;
+  document.getElementById('document-edit-id').value = docId || '';
+  const title = document.getElementById('document-modal-title');
+  const c = certs.find(x => x.id === certId);
+  if(docId){
+    const d = c && Array.isArray(c.docs) ? c.docs.find(x => x.id === docId) : null;
+    title.textContent = 'Edit document';
+    document.getElementById('d-name').value = d ? d.name : '';
+    document.getElementById('d-url').value = d ? (d.url || '') : '';
+  }else{
+    title.textContent = 'Add document';
+    document.getElementById('d-name').value = '';
+    document.getElementById('d-url').value = '';
+  }
+  document.getElementById('d-location').value = (c && c.docLocation) || '';
+  document.getElementById('document-modal-bg').classList.add('open');
+  document.getElementById('document-modal-bg').style.display = 'flex';
+  document.getElementById('d-name').focus();
+}
+
+function closeDocumentModal(){
+  document.getElementById('document-modal-bg').classList.remove('open');
+  document.getElementById('document-modal-bg').style.display = 'none';
+}
+
+async function saveDocumentEntry(){
+  const name = document.getElementById('d-name').value.trim();
+  if(!name){
+    document.getElementById('document-err').style.display = 'block';
+    return;
+  }
+  const certId = document.getElementById('document-cert-id').value;
+  const docId = document.getElementById('document-edit-id').value;
+  const url = document.getElementById('d-url').value.trim();
+  const location = document.getElementById('d-location').value.trim();
+  const today = new Date().toISOString().slice(0,10);
+
+  const c = certs.find(x => x.id === certId);
+  if(!c) return;
+  if(!Array.isArray(c.docs)) c.docs = [];
+  if(!Array.isArray(c.docChangeLog)) c.docChangeLog = [];
+
+  if(docId){
+    const idx = c.docs.findIndex(x => x.id === docId);
+    if(idx > -1){
+      c.docs[idx] = {...c.docs[idx], name, url};
+      c.docChangeLog.push({id: newLogId(), date: today, time: nowTime(), ts: Date.now(), text: 'Document updated: ' + name});
+    }
+  }else{
+    c.docs.push({id: 'd' + Date.now(), name, url});
+    c.docChangeLog.push({id: newLogId(), date: today, time: nowTime(), ts: Date.now(), text: 'Document added: ' + name});
+  }
+  if(location !== (c.docLocation || '')){
+    c.docChangeLog.push({id: newLogId(), date: today, time: nowTime(), ts: Date.now(), text: 'Document location updated: ' + (location || '(cleared)')});
+    c.docLocation = location;
+  }
+  await persist();
+  closeDocumentModal();
+  render();
+}
+
+async function deleteDocument(certId, docId){
+  const c = certs.find(x => x.id === certId);
+  if(!c || !Array.isArray(c.docs)) return;
+  const d = c.docs.find(x => x.id === docId);
+  c.docs = c.docs.filter(x => x.id !== docId);
+  if(!Array.isArray(c.docChangeLog)) c.docChangeLog = [];
+  if(d) c.docChangeLog.push({id: newLogId(), date: new Date().toISOString().slice(0,10), time: nowTime(), ts: Date.now(), text: 'Document removed: ' + d.name});
+  await persist();
+  render();
+}
+
+function readAutoFormFields(){
+  const v = id => document.getElementById(id).value;
+  return {
+    authority: v('f-authority'),
+    level: v('f-level'),
+    aircraft: v('f-aircraft'),
+    serial: v('f-serial'),
+    simModel: v('f-model')
+  };
+}
+
+// Keeps the Name and SIM model boxes showing their automatic values while they are left empty.
+function refreshAutoFields(){
+  const f = readAutoFormFields();
+  const detected = detectModel(f.serial);
+  const modelEl = document.getElementById('f-model');
+  modelEl.placeholder = detected || 'e.g. MCX';
+  document.getElementById('model-mode').textContent = modelEl.value.trim() ? 'Custom' : (detected ? 'From serial' : '');
+  document.getElementById('model-mode').style.display = document.getElementById('model-mode').textContent ? '' : 'none';
+  const nameEl = document.getElementById('f-name');
+  const auto = autoName(f);
+  nameEl.placeholder = auto || 'Fill in authority, level and aircraft, or type a name';
+  document.getElementById('name-mode').textContent = nameEl.value.trim() ? 'Custom' : 'Automatic';
+}
+
+['f-name', 'f-authority', 'f-level', 'f-aircraft', 'f-serial', 'f-model'].forEach(id => {
+  document.getElementById(id).addEventListener('input', refreshAutoFields);
+});
+
+// kind 'customer' = new customer (from "Add customer"); a prefilled customer = new project for that customer.
+// Authority list: the fixed names, plus any other value already in use (so nothing is lost).
+function fillAuthorityOptions(current){
+  const extra = [...new Set(certs.map(c => (c.authority || '').trim()).filter(a => a && !AUTHORITIES.includes(a)))];
+  if(current && !AUTHORITIES.includes(current) && !extra.includes(current)) extra.push(current);
+  document.getElementById('f-authority').innerHTML = '<option value="">Select\u2026</option>'
+    + AUTHORITIES.map(a => `<option>${escapeHtml(a)}</option>`).join('')
+    + (extra.length ? `<optgroup label="Other names in use">${extra.sort().map(a => `<option>${escapeHtml(a)}</option>`).join('')}</optgroup>` : '');
+  document.getElementById('f-authority').value = current || '';
+  const levels = [...new Set([...LEVEL_SUGGESTIONS, ...certs.map(c => (c.level || '').trim()).filter(Boolean)])].sort(textCmp);
+  document.getElementById('level-list').innerHTML = levels.map(l => `<option value="${escapeHtml(l)}">`).join('');
+}
+
+function fillQualification(q){
+  q = q || {};
+  document.getElementById('q-status').innerHTML = '<option value="">Not set</option>'
+    + QUAL_STATUSES.map(s => `<option>${s}</option>`).join('');
+  document.getElementById('q-basis').innerHTML = '<option value="">Not set</option>'
+    + library.documents.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(docTitle(d))}${d.revision ? ' \u2013 ' + escapeHtml(d.revision) : ''}</option>`).join('');
+  document.getElementById('q-status').value = q.status || '';
+  document.getElementById('q-number').value = q.certificateNumber || '';
+  document.getElementById('q-issue').value = q.issueDate || '';
+  document.getElementById('q-expiry').value = q.expiryDate || '';
+  document.getElementById('q-eval').value = q.nextEvaluation || '';
+  document.getElementById('q-basis').value = q.basis || '';
+  document.getElementById('q-conditions').value = q.conditions || '';
+}
+
+function readQualification(){
+  const v = id => document.getElementById(id).value.trim();
+  return {status: v('q-status'), certificateNumber: v('q-number'), issueDate: v('q-issue'), expiryDate: v('q-expiry'),
+    nextEvaluation: v('q-eval'), basis: v('q-basis'), conditions: v('q-conditions')};
+}
+
+function openModal(id, prefillCustomer, kind, focus){
+  document.getElementById('err-name').style.display = 'none';
+  const modal = document.getElementById('modal-bg');
+  const title = document.getElementById('modal-title');
+  if(id){
+    const c = certs.find(x => x.id === id);
+    title.textContent = 'Edit certification';
+    document.getElementById('edit-id').value = c.id;
+    document.getElementById('f-name').value = c.nameAuto ? '' : (c.name || '');
+    document.getElementById('f-model').value = c.simModel || '';
+    document.getElementById('f-customer').value = c.customer || '';
+    fillAuthorityOptions(c.authority || '');
+    fillQualification(c.qualification);
+    document.getElementById('f-country').value = c.country || '';
+    document.getElementById('f-simlocation').value = c.simLocation || '';
+    document.getElementById('f-serial').value = c.serial || '';
+    document.getElementById('f-aircraft').value = c.aircraft || '';
+    document.getElementById('f-level').value = c.level || '';
+    document.getElementById('f-date').value = c.date || '';
+    document.getElementById('f-contact-name').value = contactName(c);
+    document.getElementById('f-contact-email').value = contactEmail(c);
+  }else{
+    title.textContent = kind === 'customer' ? 'Add customer' : (prefillCustomer ? 'Add project' : 'Add certification');
+    document.getElementById('edit-id').value = '';
+    document.getElementById('f-name').value = '';
+    document.getElementById('f-model').value = '';
+    document.getElementById('f-customer').value = prefillCustomer || '';
+    fillAuthorityOptions('');
+    fillQualification(null);
+    document.getElementById('f-country').value = '';
+    document.getElementById('f-simlocation').value = '';
+    document.getElementById('f-serial').value = '';
+    document.getElementById('f-aircraft').value = '';
+    document.getElementById('f-level').value = '';
+    document.getElementById('f-date').value = '';
+    document.getElementById('f-contact-name').value = '';
+    document.getElementById('f-contact-email').value = '';
+  }
+  refreshAutoFields();
+  modal.classList.add('open');
+  if(focus === 'qual'){
+    document.getElementById('qual-head').scrollIntoView({block: 'start'});
+    document.getElementById('q-status').focus();
+  }else{
+    document.getElementById(id ? 'f-name' : (prefillCustomer ? 'f-simlocation' : 'f-customer')).focus();
+  }
+}
+
+function closeModal(){
+  document.getElementById('modal-bg').classList.remove('open');
+}
+
+async function saveCert(){
+  const typedName = document.getElementById('f-name').value.trim();
+  const id = document.getElementById('edit-id').value;
+  const data = {
+    simModel: document.getElementById('f-model').value.trim(),
+    customer: document.getElementById('f-customer').value.trim(),
+    authority: document.getElementById('f-authority').value.trim(),
+    country: document.getElementById('f-country').value.trim(),
+    simLocation: document.getElementById('f-simlocation').value.trim(),
+    serial: document.getElementById('f-serial').value.trim(),
+    aircraft: document.getElementById('f-aircraft').value.trim(),
+    level: document.getElementById('f-level').value.trim(),
+    date: document.getElementById('f-date').value,
+    contactName: document.getElementById('f-contact-name').value.trim(),
+    contactEmail: document.getElementById('f-contact-email').value.trim(),
+    qualification: readQualification()
+  };
+  const generated = autoName(data);
+  if(!typedName && !generated){
+    document.getElementById('err-name').style.display = 'block';
+    return;
+  }
+  // An empty Name box means "automatic"; the generated name is also stored so the data file stays readable.
+  data.nameAuto = !typedName;
+  data.name = typedName || generated;
+
+  if(id){
+    const idx = certs.findIndex(c => c.id === id);
+    if(idx > -1){
+      const prev = certs[idx];
+      certs[idx] = {...prev, ...data};
+      delete certs[idx].primaryContact;
+      if(!Array.isArray(certs[idx].activityLog)) certs[idx].activityLog = [];
+      if(!Array.isArray(certs[idx].docChangeLog)) certs[idx].docChangeLog = [];
+      if(!Array.isArray(certs[idx].docs)) certs[idx].docs = [];
+    }
+  }else{
+    const newId = 'c' + Date.now();
+    view = {type: 'cert', id: newId};
+    navFrom = null;
+    certs.push({id: newId, ...data, docs: [], docLocation: '', activityLog: [], docChangeLog: []});
+  }
+  expandedCustomers.add(customerKey(data));
+  await persist();
+  closeModal();
+  render();
+}
+
+async function completeCert(id){
+  const c = certs.find(x => x.id === id);
+  if(!c) return;
+  c.completed = true;
+  c.dateCompleted = localToday();
+  await persist();
+  render();
+}
+
+async function reopenCert(id){
+  const c = certs.find(x => x.id === id);
+  if(!c) return;
+  c.completed = false;
+  delete c.dateCompleted;
+  await persist();
+  render();
+}
+
+// Deleting a certification asks first, since it also removes its documents, change log and activities.
+let pendingDeleteId = null;
+
+function removeCert(id){
+  const c = certs.find(x => x.id === id);
+  if(!c) return;
+  pendingDeleteId = id;
+  const parts = [];
+  const docs = Array.isArray(c.docs) ? c.docs.length : 0;
+  const logs = Array.isArray(c.docChangeLog) ? c.docChangeLog.length : 0;
+  const acts = Array.isArray(c.activityLog) ? c.activityLog.length : 0;
+  if(docs) parts.push(countLabel(docs, 'document', 'documents'));
+  if(logs) parts.push(countLabel(logs, 'change log entry', 'change log entries'));
+  if(acts) parts.push(countLabel(acts, 'activity', 'activities'));
+  const also = parts.length
+    ? `This also deletes its ${parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]}. `
+    : '';
+  document.getElementById('confirm-body').innerHTML = `
+    <p class="confirm-name"><strong>${escapeHtml(certName(c))}</strong><br>
+    <span class="confirm-context">${escapeHtml(customerKey(c))}${c.serial ? ' / ' + escapeHtml(c.serial) : ''}</span></p>
+    <p>${also}It can't be undone.</p>`;
+  document.getElementById('confirm-modal-bg').classList.add('open');
+  document.getElementById('confirm-cancel-btn').focus();
+}
+
+function closeDeleteConfirm(){
+  pendingDeleteId = null;
+  document.getElementById('confirm-modal-bg').classList.remove('open');
+}
+
+async function confirmDeleteCert(){
+  const id = pendingDeleteId;
+  closeDeleteConfirm();
+  if(!id) return;
+  certs = certs.filter(c => c.id !== id);
+  await persist();
+  render();
+}
+
+document.getElementById('cancel-btn').addEventListener('click', closeModal);
+
+document.getElementById('save-btn').addEventListener('click', saveCert);
+
+document.getElementById('modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'modal-bg') closeModal();
+});
+
+document.getElementById('activity-cancel-btn').addEventListener('click', closeActivityModal);
+
+document.getElementById('activity-save-btn').addEventListener('click', saveActivityEntry);
+
+document.getElementById('activity-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'activity-modal-bg') closeActivityModal();
+});
+
+document.getElementById('confirm-cancel-btn').addEventListener('click', closeDeleteConfirm);
+
+document.getElementById('confirm-delete-btn').addEventListener('click', confirmDeleteCert);
+
+document.getElementById('confirm-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'confirm-modal-bg') closeDeleteConfirm();
+});
+
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && document.getElementById('confirm-modal-bg').classList.contains('open')) closeDeleteConfirm();
+});
+
+document.getElementById('changelog-cancel-btn').addEventListener('click', closeChangeLogModal);
+
+document.getElementById('changelog-save-btn').addEventListener('click', saveChangeLogEntry);
+
+document.getElementById('changelog-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'changelog-modal-bg') closeChangeLogModal();
+});
+
+document.getElementById('document-cancel-btn').addEventListener('click', closeDocumentModal);
+
+document.getElementById('document-save-btn').addEventListener('click', saveDocumentEntry);
+
+document.getElementById('document-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'document-modal-bg') closeDocumentModal();
+});
+
+document.getElementById('lib-cancel-btn').addEventListener('click', closeLibraryModal);
+document.getElementById('lib-save-btn').addEventListener('click', saveLibraryDoc);
+document.getElementById('lib-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'lib-modal-bg') closeLibraryModal();
+});
+document.getElementById('admin-btn').addEventListener('click', openAdmin);
+document.getElementById('admin-close-btn').addEventListener('click', closeAdmin);
+document.getElementById('admin-clear-btn').addEventListener('click', clearAllSearchHistory);
+document.getElementById('admin-modal-bg').addEventListener('click', (e) => {
+  if(e.target.id === 'admin-modal-bg') closeAdmin();
+});
+
+// ---- Keeping tabs up to date ----
+function syncKey(){
+  return ghConfig ? `${ghConfig.owner}/${ghConfig.repo}@${ghConfig.branch}:${ghConfig.path}`.toLowerCase() : '';
+}
+
+// Check GitHub again when this tab is selected, unless a pop-up form is open or a save is running.
+async function refreshFromGitHub(){
+  if(!ghConfig || saving || document.querySelector('.modal-bg.open')) return;
+  if(Date.now() - lastFetchAt < 5000) return;
+  const prevSha = currentSha;
+  const versionAtStart = localVersion;
+  try{
+    const remote = await fetchFromGitHub();
+    // A save started meanwhile: keep the local data and its SHA.
+    if(saving || localVersion !== versionAtStart){ currentSha = prevSha; return; }
+    if(Array.isArray(remote) && currentSha !== prevSha && !document.querySelector('.modal-bg.open')){
+      certs = remote;
+      render();
+    }
+  }catch(e){ /* keep showing what's already loaded */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') refreshFromGitHub();
+});
+
+window.addEventListener('focus', refreshFromGitHub);
+
+// Tabs in the same browser: share saves straight away, and note when the editor is open twice.
+const TAB_ID = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+const otherEditors = new Set();
+
+const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('cert-tracker-sync') : null;
+
+function broadcastSaved(){
+  if(!syncChannel) return;
+  try{ syncChannel.postMessage({type: 'saved', from: TAB_ID, key: syncKey(), sha: currentSha, data: certs, library}); }catch(e){}
+}
+
+function updateTabNote(){
+  document.getElementById('tab-note').style.display = otherEditors.size ? 'block' : 'none';
+}
+
+if(syncChannel){
+  syncChannel.onmessage = (ev) => {
+    const m = ev.data || {};
+    if(m.from === TAB_ID) return;
+    if(m.type === 'saved'){
+      if(saving || m.key !== syncKey() || !Array.isArray(m.data)) return;
+      certs = m.data;
+      if(m.library) library = normalizeLibrary(m.library);
+      currentSha = m.sha || currentSha;
+      localVersion++;
+      render();
+    }else if(m.type === 'editor-hello'){
+      // A newly opened editor: tell it this one is already open.
+      syncChannel.postMessage({type: 'editor-here', from: TAB_ID});
+    }else if(m.type === 'editor-here'){
+      otherEditors.add(m.from);
+      updateTabNote();
+    }else if(m.type === 'editor-bye'){
+      otherEditors.delete(m.from);
+      updateTabNote();
+    }
+  };
+  syncChannel.postMessage({type: 'editor-hello', from: TAB_ID});
+  window.addEventListener('pagehide', () => {
+    try{ syncChannel.postMessage({type: 'editor-bye', from: TAB_ID}); }catch(e){}
+  });
+  window.addEventListener('pageshow', (ev) => {
+    if(ev.persisted){
+      otherEditors.clear();
+      updateTabNote();
+      syncChannel.postMessage({type: 'editor-hello', from: TAB_ID});
+      refreshFromGitHub();
+    }
+  });
+}
+
+initHeader();
+load();
+</script>
+</body>
+</html>
