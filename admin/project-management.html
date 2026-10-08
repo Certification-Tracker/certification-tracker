@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Project Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.1.0.2">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.1.1">
 </head>
 <body>
 <div class="wrap">
@@ -39,7 +39,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.1.0</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.1.1</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <div class="modal-bg" id="modal-bg">
@@ -313,6 +313,7 @@
       <label for="atd-kb-url">Knowledge base article</label>
       <input id="atd-kb-url" type="url" placeholder="https://support.redbirdflight.com/...">
       <div class="field-hint">Leave blank to let the weekly check find it. Paste the device's QAG/LOA article link if it can't.</div>
+      <label class="check-line"><input type="checkbox" id="atd-kb-exclude"> <span>Not published in the knowledge base <span class="muted">(the weekly check skips this device)</span></span></label>
     </div>
     <div class="field">
       <label for="atd-cert-filter">Linked certification projects <span class="muted" id="atd-cert-count"></span></label>
@@ -347,8 +348,8 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.1.0.2"></script>
-<script src="../assets/atd.js?v=3.1.0.2"></script>
+<script src="../assets/tracker.js?v=3.1.1"></script>
+<script src="../assets/atd.js?v=3.1.1"></script>
 <script>
 // Editor: everything specific to editing. Shared code is in ../assets/tracker.js.
 
@@ -497,8 +498,7 @@ async function deleteLibraryDoc(id){
   const d = libraryDoc(id);
   if(!d || !confirm(`Remove ${docTitle(d)} from the library?\n\nThe PDF itself stays in the data repo's regs/ folder; delete it there if you no longer need it.`)) return;
   library.documents = library.documents.filter(x => x.id !== id);
-  delete regIndex[id];
-  delete regIndexRaw[id];
+  delete pageIndexes['regs/index/' + id + '.json'];
   if(!await persistLibrary(`Library: remove ${docTitle(d)}`, 'Removed from the library.')) return;
   // Tidy up its search index (best effort).
   try{
@@ -515,23 +515,28 @@ async function deleteLibraryDoc(id){
 // Reads the PDF's text page by page with PDF.js (Mozilla's PDF reader) and saves it as
 // regs/index/<id>.json, which the search uses.
 const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-let pdfjsReady = null;
 
-function loadPdfJs(){
-  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
-  if(!pdfjsReady){
-    pdfjsReady = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = PDFJS_URL;
-      s.onload = () => {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace('pdf.min.js', 'pdf.worker.min.js');
-        resolve(window.pdfjsLib);
-      };
-      s.onerror = () => { pdfjsReady = null; reject(new Error('Could not load the PDF reader. Check your connection and try again.')); };
-      document.head.appendChild(s);
+// Loads a library from the CDN once and resolves with its global (PDF.js, SheetJS).
+const scriptLoads = {};
+function loadScript(url, globalName, failText){
+  if(window[globalName]) return Promise.resolve(window[globalName]);
+  if(!scriptLoads[url]){
+    scriptLoads[url] = new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = url;
+      el.onload = () => resolve(window[globalName]);
+      el.onerror = () => { delete scriptLoads[url]; el.remove(); reject(new Error(failText)); };
+      document.head.appendChild(el);
     });
   }
-  return pdfjsReady;
+  return scriptLoads[url];
+}
+
+function loadPdfJs(){
+  return loadScript(PDFJS_URL, 'pdfjsLib', 'Could not load the PDF reader. Check your connection and try again.').then(lib => {
+    lib.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace('pdf.min.js', 'pdf.worker.min.js');
+    return lib;
+  });
 }
 
 async function rebuildIndex(id){
@@ -556,8 +561,7 @@ async function rebuildIndex(id){
     await ghWriteFile(path, JSON.stringify({id: d.id, pages}), await ghFileSha(path), `Library: search index for ${docTitle(d)}`);
     d.pages = pdf.numPages;
     d.indexed = true;
-    delete regIndex[d.id];
-    delete regIndexRaw[d.id];
+    delete pageIndexes['regs/index/' + d.id + '.json'];
     await writeLibrary(`Library: ${docTitle(d)} indexed`);
     broadcastSaved();
     showBanner('success', `Search index built: ${countLabel(pdf.numPages, 'page', 'pages')}.`);
@@ -575,21 +579,10 @@ async function rebuildIndex(id){
 // FAA ATD approvals (3.1): spreadsheet import and device details
 // =====================================================================
 const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-let xlsxReady = null;
 let pendingImport = null;
 
 function loadXlsx(){
-  if(window.XLSX) return Promise.resolve(window.XLSX);
-  if(!xlsxReady){
-    xlsxReady = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = XLSX_URL;
-      s.onload = () => resolve(window.XLSX);
-      s.onerror = () => { xlsxReady = null; reject(new Error('Could not load the spreadsheet reader. Check your connection and try again.')); };
-      document.head.appendChild(s);
-    });
-  }
-  return xlsxReady;
+  return loadScript(XLSX_URL, 'XLSX', 'Could not load the spreadsheet reader. Check your connection and try again.');
 }
 
 async function persistAtd(message, successText){
@@ -688,6 +681,7 @@ function openAtdDeviceModal(id){
   document.getElementById('atd-dev-title').textContent = 'Edit ' + d.name;
   document.getElementById('atd-dev-id').value = d.id;
   document.getElementById('atd-kb-url').value = d.kbUrl || '';
+  document.getElementById('atd-kb-exclude').checked = !!d.kbExclude;
   atdCertChosen = new Set(d.certIds || []);
   document.getElementById('atd-cert-filter').value = '';
   renderAtdCertList();
@@ -730,6 +724,7 @@ async function saveAtdDevice(){
   let url = document.getElementById('atd-kb-url').value.trim();
   if(url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
   d.kbUrl = url;
+  d.kbExclude = document.getElementById('atd-kb-exclude').checked;
   d.certIds = [...atdCertChosen].filter(id => certs.some(c => c.id === id));
   closeAtdDeviceModal();
   await persistAtd(`ATD: update ${d.name}`);

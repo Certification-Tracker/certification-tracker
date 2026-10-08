@@ -122,7 +122,11 @@ function atdGroups(list){
 }
 
 // ---- Knowledge base comparison (scripts/check_kb.py) ----
-function kbOf(id){ return kbStatus && kbStatus.devices && kbStatus.devices[id] || null; }
+function kbOf(id){
+  const d = atdDevice(id);
+  if(d && d.kbExclude) return {status: 'excluded'};   // 3.1.1: not published in the knowledge base
+  return kbStatus && kbStatus.devices && kbStatus.devices[id] || null;
+}
 function kbChecked(){ return kbStatus && kbStatus.checkedAt ? fmtDate(String(kbStatus.checkedAt).slice(0, 10)) : ''; }
 function kbBehind(){ return atdSorted(atd.devices.filter(d => (kbOf(d.id) || {}).status === 'kb-behind')); }
 function sheetBehind(){ return atdSorted(atd.devices.filter(d => (kbOf(d.id) || {}).status === 'sheet-behind')); }
@@ -135,7 +139,8 @@ function kbPill(d){
   if(!k) return `<span class="pill pill-neutral">Not yet checked</span>`;
   const map = {
     'match': ['sage', 'Matches'], 'found': ['sage', 'Found'], 'kb-behind': ['overdue', 'KB behind'],
-    'sheet-behind': ['gold', 'Spreadsheet behind'], 'not-found': ['neutral', 'Not found'], 'error': ['neutral', 'Check failed']
+    'sheet-behind': ['gold', 'Spreadsheet behind'], 'not-found': ['neutral', 'Not found'], 'error': ['neutral', 'Check failed'],
+    'excluded': ['neutral', 'Not published']
   };
   const [cls, label] = map[k.status] || ['neutral', k.status];
   return `<span class="pill pill-${cls}">${label}</span>`;
@@ -250,10 +255,6 @@ function renderAtdView(){
 }
 
 // One device: approval details, then its LOA and QAG from the knowledge base in the main panel.
-const atdPdfUrls = {};
-const atdPdfFailed = {};
-const atdPdfLoading = {};
-
 function renderAtdDevice(){
   const d = atdDevice(view.id);
   if(!d) return atdLoaded ? renderAtdView() : '<div class="muted">Loading…</div>';
@@ -261,8 +262,7 @@ function renderAtdDevice(){
   const kinds = ['loa', 'qag'].filter(x => kbFile(d, x));
   const doc = kinds.includes(view.doc) ? view.doc : kinds[0] || '';
   const file = doc ? kbFile(d, doc) : null;
-  const pg = view.page > 1 ? '#page=' + view.page : '';
-  const url = file && atdPdfUrls[file.path] ? atdPdfUrls[file.path] + pg : '';
+  const url = file ? pdfPageUrl(file.path, view.page || 1) : '';
   const days = atdDays(d);
   const field = (label, value) => `<div><div class="fk">${label}</div><div class="fv">${value}</div></div>`;
   const linked = (d.certIds || []).map(id => certs.find(c => c.id === id)).filter(Boolean);
@@ -274,6 +274,7 @@ function renderAtdDevice(){
     if(k.status === 'kb-behind') kbNote = `<div class="reg-note kb-behind"><strong>Knowledge base behind the spreadsheet.</strong> ${kbDiffs(d, 'kb-behind').map(diffLine).join('; ')}. Post the new documents to the KB article.${when}</div>`;
     else if(k.status === 'sheet-behind') kbNote = `<div class="reg-note update"><strong>Spreadsheet behind the knowledge base.</strong> ${kbDiffs(d).map(diffLine).join('; ')}. Update FAA_Approval_Tracker.xlsx and import it again.${when}</div>`;
     else if(k.status === 'match') kbNote = `<div class="reg-note current">Knowledge base matches the spreadsheet${kbVer ? ` (QAG ${vLabel(kbVer)}${k.kb.loaDate ? ', LOA ' + fmtDate(k.kb.loaDate) : ''})` : ''}.${when}</div>`;
+    else if(k.status === 'excluded') kbNote = `<div class="reg-note muted-note">Not published in the knowledge base, so the weekly check skips this device. Change it with Edit.</div>`;
     else if(k.status === 'not-found') kbNote = `<div class="reg-note muted-note">No QAG/LOA article was found for this device in the knowledge base. Use Edit to add its article link.${when}</div>`;
     else if(k.status === 'error') kbNote = `<div class="reg-note error">The weekly check couldn't read this device's article${k.note ? `: ${escapeHtml(k.note)}` : ''}. It will try again next week.${when}</div>`;
     else if(!k.status) kbNote = `<div class="reg-note muted-note">The weekly knowledge base check hasn't run for this device yet. Run it from the Actions tab in tracker-data, or wait for Monday's run.</div>`;
@@ -305,49 +306,28 @@ function renderAtdDevice(){
     <div class="atd-docs">
       ${kinds.length ? `<div class="tabs" role="tablist">${kinds.map(x => `<button class="tab ${x === doc ? 'on' : ''}" role="tab" aria-selected="${x === doc}" type="button" onclick="openAtdDevice('${d.id}', '${x}')">${ICON.file} ${x.toUpperCase()}${x === 'qag' && kbVer ? ' ' + vLabel(kbVer) : ''}${x === 'loa' && k.kb && k.kb.loaDate ? ' ' + fmtDate(k.kb.loaDate) : ''}</button>`).join('')}</div>` : ''}
       <div class="detail-actions doc-actions">
-        ${file ? `<a class="btn-text atd-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>` : ''}
+        ${file ? `<a class="btn-text pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>` : ''}
         ${article ? `<a class="btn-text" href="${escapeHtml(article)}" target="_blank" rel="noopener noreferrer">${ICON.globe}<span>Open in knowledge base</span></a>` : ''}
       </div>
       ${file ? `
-        ${url ? '' : `<div class="reg-loading" id="atd-loading">Loading the document&hellip;</div>`}
+        ${url ? '' : `<div class="reg-loading" id="pdf-loading">Loading the document&hellip;</div>`}
         ${isPhone()
-          ? `<a class="btn-primary open-doc-btn atd-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open ${doc.toUpperCase()}</span></a>`
-          : `<iframe class="pdf-frame" id="atd-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(d.name)} ${doc.toUpperCase()}"></iframe>`}
+          ? `<a class="btn-primary open-doc-btn pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open ${doc.toUpperCase()}</span></a>`
+          : `<iframe class="pdf-frame" id="pdf-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(d.name)} ${doc.toUpperCase()}"></iframe>`}
         <div class="muted search-note">Copy from the knowledge base, stored ${fmtDate(file.storedAt)}. Checked weekly.</div>`
       : `<div class="muted list-empty">${article ? 'The LOA and QAG haven’t been stored from the knowledge base yet. They appear after the next weekly check.' : 'No LOA or QAG from the knowledge base for this device.'}</div>`}
     </div>`;
 }
 
 function attachAtdPdf(){
-  if(view.type !== 'atd-dev') return;
-  const d = atdDevice(view.id);
+  const d = view.type === 'atd-dev' && atdDevice(view.id);
   if(!d) return;
   const kinds = ['loa', 'qag'].filter(x => kbFile(d, x));
   const doc = kinds.includes(view.doc) ? view.doc : kinds[0];
   const file = doc && kbFile(d, doc);
   if(!file) return;
-  const apply = () => {
-    if(view.type !== 'atd-dev' || view.id !== d.id) return;
-    const status = document.getElementById('atd-loading');
-    if(atdPdfFailed[file.path]){
-      if(status){ status.textContent = `Couldn't load ${file.path} from the data repo.`; status.classList.add('error'); }
-      return;
-    }
-    if(!atdPdfUrls[file.path]) return;
-    const url = atdPdfUrls[file.path] + (view.page > 1 ? '#page=' + view.page : '');
-    const frame = document.getElementById('atd-frame');
-    if(frame && frame.dataset.src !== url){ frame.src = url; frame.dataset.src = url; frame.hidden = false; }
-    document.querySelectorAll('.atd-open-link').forEach(a => { a.href = url; a.classList.remove('disabled'); a.removeAttribute('aria-disabled'); });
-    if(status) status.remove();
-  };
-  if(atdPdfUrls[file.path] || atdPdfFailed[file.path]) return apply();
-  if(!atdPdfLoading[file.path]){
-    atdPdfLoading[file.path] = ghRaw(file.path)
-      .then(async res => { atdPdfUrls[file.path] = URL.createObjectURL(new Blob([await res.arrayBuffer()], {type: 'application/pdf'})); })
-      .catch(() => { atdPdfFailed[file.path] = true; })
-      .finally(() => { delete atdPdfLoading[file.path]; });
-  }
-  atdPdfLoading[file.path].then(apply);
+  attachPdf(file.path, view.page || 1, () => view.type === 'atd-dev' && view.id === d.id && (view.doc || kinds[0]) === doc,
+    `Couldn't load ${file.path} from the data repo.`);
 }
 
 // Certification page: the ATD devices this certification is linked to.
@@ -371,8 +351,6 @@ function atdRowSide(d){
 // =====================================================================
 // Search: devices, and the text of their stored LOAs and QAGs
 // =====================================================================
-const atdIndex = {};      // file path -> lower-cased page texts
-const atdIndexRaw = {};
 let atdIndexLoading = null;
 
 function atdDocsIndexed(){
@@ -382,43 +360,19 @@ function atdDocsIndexed(){
 function indexPathOf(file){ return file.path.replace(/^atd\//, 'atd/index/').replace(/\.pdf$/i, '.json'); }
 
 function ensureAtdSearch(){
-  if(!atdLoaded || atdIndexLoading) return;
-  const docs = atdDocsIndexed().filter(x => !atdIndex[x.file.path]);
-  if(!docs.length) return;
-  atdIndexLoading = Promise.all(docs.map(async x => {
-    try{
-      const json = await (await ghRaw(indexPathOf(x.file))).json();
-      const pages = Array.isArray(json.pages) ? json.pages.map(p => String(p || '')) : [];
-      atdIndexRaw[x.file.path] = pages;
-      atdIndex[x.file.path] = pages.map(p => p.toLowerCase());
-    }catch(e){
-      atdIndexRaw[x.file.path] = [];
-      atdIndex[x.file.path] = [];
-    }
-  })).then(() => { atdIndexLoading = null; lastDetailHtml = null; render(); });
+  const docs = atdDocsIndexed().filter(x => !pageIndexes[indexPathOf(x.file)]);
+  if(!atdLoaded || atdIndexLoading || !docs.length) return;
+  atdIndexLoading = Promise.all(docs.map(x => loadPageIndex(indexPathOf(x.file))))
+    .then(() => { atdIndexLoading = null; lastDetailHtml = null; render(); });
 }
 
-function atdSearchReady(){ return atdLoaded && atdDocsIndexed().every(x => atdIndex[x.file.path]); }
+function atdSearchReady(){ return atdLoaded && atdDocsIndexed().every(x => pageIndexes[indexPathOf(x.file)]); }
 
 function searchAtd(t){
   const devices = atdOrdered(atd.devices.filter(d => [d.name, d.type, d.version, d.submittedVersion, d.faaTracking, d.notes].some(v => textHas(v, t))));
-  const docs = [];
-  atdDocsIndexed().forEach(x => {
-    const pages = atdIndex[x.file.path];
-    if(!pages) return;
-    const hits = [];
-    let matches = 0;
-    pages.forEach((lower, i) => {
-      let at = findWordStart(lower, t);
-      if(at < 0) return;
-      const first = at;
-      let n = 0;
-      while(at > -1){ n++; at = findWordStart(lower, t, at + t.length); }
-      matches += n;
-      hits.push({page: i + 1, n, snippet: excerpt(atdIndexRaw[x.file.path][i], first, t.length)});
-    });
-    if(hits.length) docs.push({...x, hits, matches});
-  });
+  const docs = atdDocsIndexed().filter(x => pageIndexes[indexPathOf(x.file)])
+    .map(x => ({...x, ...searchPages(pageIndexes[indexPathOf(x.file)], t)}))
+    .filter(r => r.hits.length);
   return {devices, docs, count: devices.length + docs.reduce((n, r) => n + r.hits.length, 0)};
 }
 
@@ -560,10 +514,10 @@ function diffAtdImport(oldDevices, newDevices){
   return out;
 }
 
-// Keeps what only the tracker knows (KB link, linked certifications) across imports.
+// Keeps what only the tracker knows (KB link, not-published setting, linked certifications) across imports.
 function mergeAtdImport(oldDevices, newDevices){
   const byId = Object.fromEntries(oldDevices.map(d => [d.id, d]));
-  return newDevices.map(d => ({...d, kbUrl: (byId[d.id] || {}).kbUrl || '', certIds: (byId[d.id] || {}).certIds || []}));
+  return newDevices.map(d => ({...d, kbUrl: (byId[d.id] || {}).kbUrl || '', kbExclude: !!(byId[d.id] || {}).kbExclude, certIds: (byId[d.id] || {}).certIds || []}));
 }
 
 if(typeof module !== 'undefined') module.exports = {parseAtdRows, diffAtdImport, mergeAtdImport, cmpVersion, cleanVersion, cleanDeviceName, deviceId, excelDate};

@@ -4,7 +4,7 @@
 // connection, then calls load(). Everything else lives here.
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.1.0';
+const VERSION = 'v3.1.1';
 const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
 
 // ---- Data and page state ----
@@ -162,6 +162,7 @@ function backLinkHtml(){
 let lastDetailHtml = null;
 
 function render(){
+  regMemo = new Map();
   renderSummary();
   syncSearchInput();
   const list = document.getElementById('list');
@@ -280,9 +281,11 @@ function homeCard(title, headRight, body){
 }
 
 // tag: why the row is there; action: what clicking it opens (see openRow).
+// tag may be a list of [label, cls] pairs when a row has several reasons.
 function homeRow(tag, cls, text, side, action){
   rowActions.push(action);
-  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="pill pill-${cls} home-tag">${escapeHtml(tag)}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
+  const tags = Array.isArray(tag) ? tag : [[tag, cls]];
+  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="home-tags">${tags.map(([t, c]) => `<span class="pill pill-${c} home-tag">${escapeHtml(t)}</span>`).join('')}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
 }
 
 function homeClear(text){ return `<div class="home-clear">${text}</div>`; }
@@ -309,17 +312,37 @@ function renderCertsHome(){
   const who = c => escapeHtml(customerKey(c));
   const actText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(x.a.description || x.a.text, 90))}`;
   const actAction = x => ({type: 'act', certId: x.c.id, activityId: x.a.id});
-  const rows = [
-    ...certOverdue.map(c => homeRow('Overdue', 'overdue', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'due ' + fmtDate(c.date), {type: 'cert', id: c.id})),
-    ...actOverdue.map(x => homeRow('Overdue', 'overdue', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x))),
-    ...qualExpired.map(c => homeRow('Expired', 'overdue', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, qual(c).expiryDate ? 'expired ' + fmtDate(qual(c).expiryDate) : 'qualification', {type: 'cert', id: c.id})),
-    ...actWeek.map(x => homeRow('Due this week', 'slate', actText(x), fmtDate(x.a.dateDue), actAction(x))),
-    ...qualExp.map(c => homeRow('Expiring', 'gold', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'expires ' + fmtDate(qual(c).expiryDate), {type: 'cert', id: c.id})),
-    ...certDue.map(c => homeRow('Due in 30 days', 'slate', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, fmtDate(c.date), {type: 'cert', id: c.id})),
-    ...qualCond.map(c => homeRow('Conditional', 'gold', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'qualification', {type: 'cert', id: c.id})),
-    ...waiting.map(w => homeRow('Waiting', 'plum', w.list.length > 1 ? `${who(w.list[0].c)} \u00b7 ${w.list.length} activities` : actText(w.list[0]),
-      w.since ? 'since ' + fmtDate(w.since) : 'no date', actAction(w.list[0])))
-  ];
+  const certText = c => `${who(c)} \u00b7 ${escapeHtml(certName(c))}`;
+  const certAction = c => ({type: 'cert', id: c.id});
+  // One list (3.1.1): soonest date first (overdue items lead), then undated items, oldest Waiting first.
+  // An item that meets several rules is one row carrying each reason.
+  const items = new Map();
+  const add = (key, date, tag, cls, text, side, action) => {
+    const it = items.get(key) || {date, tags: [], text, side, action};
+    if(!it.tags.some(t => t[0] === tag)) it.tags.push([tag, cls]);
+    if(date && (!it.date || date < it.date)){ it.date = date; it.side = side; }
+    items.set(key, it);
+  };
+  certOverdue.forEach(c => add('c' + c.id, c.date, 'Overdue', 'overdue', certText(c), 'due ' + fmtDate(c.date), certAction(c)));
+  actOverdue.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Overdue', 'overdue', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x)));
+  qualExpired.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Expired', 'overdue', certText(c), qual(c).expiryDate ? 'expired ' + fmtDate(qual(c).expiryDate) : 'qualification', certAction(c)));
+  actWeek.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Due this week', 'slate', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x)));
+  qualExp.forEach(c => add('q' + c.id, qual(c).expiryDate, 'Expiring', 'gold', certText(c), 'expires ' + fmtDate(qual(c).expiryDate), certAction(c)));
+  certDue.forEach(c => add('c' + c.id, c.date, 'Due in 30 days', 'slate', certText(c), 'due ' + fmtDate(c.date), certAction(c)));
+  qualCond.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Conditional', 'gold', certText(c), qual(c).expiryDate ? 'expires ' + fmtDate(qual(c).expiryDate) : 'qualification', certAction(c)));
+  waiting.forEach(w => {
+    if(w.list.length > 1){
+      const due = w.list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
+      add('w' + w.list[0].c.id, due, 'Waiting', 'plum', `${who(w.list[0].c)} \u00b7 ${w.list.length} activities`, due ? 'due ' + fmtDate(due) : (w.since ? 'since ' + fmtDate(w.since) : 'no date'), actAction(w.list[0]));
+    }else{
+      const x = w.list[0];
+      add('a' + x.a.id, x.a.dateDue || '', 'Waiting', 'plum', actText(x), x.a.dateDue ? 'due ' + fmtDate(x.a.dateDue) : (w.since ? 'since ' + fmtDate(w.since) : 'no date'), actAction(x));
+      const it = items.get('a' + x.a.id); if(!it.since) it.since = w.since;
+    }
+    if(w.list.length > 1){ const it = items.get('w' + w.list[0].c.id); it.since = w.since; }
+  });
+  const sorted = [...items.values()].sort((a, b) => dateCmp(a.date, b.date) || dateCmp(a.since, b.since));
+  const rows = sorted.map(it => homeRow(it.tags, null, it.text, it.side, it.action));
   const clear = [];
   if(!certOverdue.length && !actOverdue.length) clear.push('Nothing overdue');
   if(!actWeek.length) clear.push('no activities due this week');
@@ -383,8 +406,9 @@ function renderCustomerList(){
     const items = sortCerts(groups[customer]);
     const anyOverdue = items.some(isCertOverdue);
     const open = expandedCustomers.has(customer);
-    // Count open certifications only; completed ones don't count.
-    const openCount = items.filter(x => !x.completed).length;
+    // Customer line: total projects, completed included (3.1.1).
+    const total = items.length;
+    const doneCount = items.filter(x => x.completed).length;
     // Active certifications first (grouped by serial), completed ones last.
     const bySerial = arr => { const g = groupBySerial(arr); return g.order.flatMap(k => g.groups[k]); };
     const ordered = [...bySerial(items.filter(x => !x.completed)), ...bySerial(items.filter(x => x.completed))];
@@ -394,7 +418,7 @@ function renderCustomerList(){
           <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
           <span class="side-customer-name">${escapeHtml(customer)}</span>
           ${anyOverdue ? '<span class="tab-overdue-dot" title="Has overdue items"></span>' : ''}
-          <span class="tab-count${openCount ? '' : ' zero'}" title="${openCount} open">${openCount}</span>
+          <span class="tab-count" title="${countLabel(total, 'project', 'projects')}${doneCount ? `, ${doneCount} completed` : ''}">${total}</span>
         </button>
         ${open ? `
         <div class="side-certs">
@@ -404,13 +428,22 @@ function renderCustomerList(){
               return `
               <button class="side-cert ${isActive ? 'active' : ''}" ${isActive ? 'aria-current="true"' : ''} title="${escapeHtml(certName(x))}" onclick="selectCert('${x.id}')">
                 ${x.completed ? '<span class="status-dot status-spacer" aria-hidden="true"></span>' : `<span class="status-dot dot-${st.cls}" title="${st.label}"></span>`}
-                <span class="side-cert-name">SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
+                <span class="side-cert-name"><span class="side-sn-line"><span>SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}</span>${sideActCount(x)}</span>${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
               </button>`;
             }).join('')}
           ${EDITOR ? actionBtn('plus', 'Add project', `openModal(null, '${escapeAttr(customer)}')`, {cls: 'side-add', compact: false}) : ''}
         </div>` : ''}
       </div>`;
   }).join('');
+}
+
+// SIM SN line (3.1.1): the project's activities, open / total; red when one is overdue.
+function sideActCount(c){
+  const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
+  if(!acts.length) return '';
+  const open = acts.filter(a => activityGroupOf(a) !== 'Complete');
+  const late = open.some(isActivityOverdue);
+  return `<span class="side-act-count${late ? ' late' : open.length ? '' : ' none'}" title="${open.length} open of ${countLabel(acts.length, 'activity', 'activities')}${late ? ', overdue' : ''}"><b>${open.length}</b>/${acts.length}</span>`;
 }
 
 function allCustomerKeys(){
@@ -508,8 +541,16 @@ function autoRegulation(c){
   return library.documents.find(d => (d.authority || '') === rule.docAuth && rule.title.test(d.title || '')) || null;
 }
 
-// {doc, auto, revision, locked} or null
+// {doc, auto, revision, locked} or null. Worked out once per screen update (cleared in render()).
+let regMemo = new Map();
 function certRegulation(c){
+  if(regMemo.has(c)) return regMemo.get(c);
+  const r = findRegulation(c);
+  regMemo.set(c, r);
+  return r;
+}
+
+function findRegulation(c){
   const q = qual(c);
   const locked = !!(c.completed && (q.basisRevision || q.basisDocId));
   const chosen = q.basis ? libraryDoc(q.basis) : null;
@@ -529,6 +570,7 @@ function regulationHtml(c){
 
 // Records the regulation and issue in force when a certification is completed (editor saves it).
 function lockRegulation(c){
+  regMemo = new Map();
   const q = {...qual(c)};
   delete q.basisRevision; delete q.basisDocId;
   c.qualification = q;
@@ -537,6 +579,7 @@ function lockRegulation(c){
 }
 
 function unlockRegulation(c){
+  regMemo = new Map();
   if(!c.qualification) return;
   delete c.qualification.basisRevision;
   delete c.qualification.basisDocId;
@@ -544,7 +587,7 @@ function unlockRegulation(c){
 
 // Open certifications that use a library document (for update flags).
 function certsUsingDoc(id, openOnly){
-  return certs.filter(c => (!openOnly || !c.completed) && (certRegulation(c) || {}).doc && certRegulation(c).doc.id === id);
+  return certs.filter(c => (!openOnly || !c.completed) && ((certRegulation(c) || {}).doc || {}).id === id);
 }
 
 function renderQualification(c){
@@ -1053,20 +1096,6 @@ function regUpdates(){
   return library.documents.filter(d => (regCheck(d.id) || {}).status === 'update').sort((a, b) => textCmp(docTitle(a), docTitle(b)));
 }
 
-function renderRegUpdatesHome(){
-  const ups = regUpdates();
-  if(!ups.length) return '';
-  return `
-    <div class="home-reg-alert">
-      <div class="home-reg-head">Regulatory updates available (${ups.length})</div>
-      ${ups.map(d => `<button class="home-reg-row" type="button" onclick="openDoc('${d.id}')"><span class="home-reg-doc">${escapeHtml(docTitle(d))}</span><span class="home-reg-what">${escapeHtml(regCheck(d.id).latest || 'Newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}</span></button>`).join('')}
-    </div>`;
-}
-
-function regUpdateCount(){
-  return library.documents.filter(d => (regCheck(d.id) || {}).status === 'update').length;
-}
-
 function regBadge(id){
   const r = regCheck(id);
   if(!r) return '';
@@ -1101,53 +1130,80 @@ function libraryAuthorities(){
 function docTitle(d){ return `${d.authority ? d.authority + ' ' : ''}${d.title}`; }
 
 // PDFs are in the private data repo, so they are fetched with the key and shown from a local copy.
-const regPdfUrls = {};      // doc id -> blob URL (kept for the visit)
-const regPdfLoading = {};
+// Shared by the regulatory library and the ATD documents (3.1.1); kept for the visit, keyed by repo path.
+const pdfBlobs = {};       // path -> blob URL, or '' when it couldn't be loaded
+const pdfLoading = {};
 
-function pdfUrl(d, page){
-  const base = regPdfUrls[d.id];
+function loadPdfBlob(path){
+  if(path in pdfBlobs) return Promise.resolve(pdfBlobs[path]);
+  if(!pdfLoading[path]){
+    pdfLoading[path] = ghRaw(path)
+      .then(async res => { pdfBlobs[path] = URL.createObjectURL(new Blob([await res.arrayBuffer()], {type: 'application/pdf'})); })
+      .catch(() => { pdfBlobs[path] = ''; })
+      .finally(() => { delete pdfLoading[path]; })
+      .then(() => pdfBlobs[path]);
+  }
+  return pdfLoading[path];
+}
+
+function pdfPageUrl(path, page){
+  const base = pdfBlobs[path];
   return base ? base + (page > 1 ? '#page=' + page : '') : '';
 }
 
-async function loadRegPdf(d){
-  if(regPdfUrls[d.id] || regPdfLoading[d.id]) return regPdfLoading[d.id];
-  regPdfLoading[d.id] = (async () => {
-    try{
-      const res = await ghRaw('regs/' + d.file);
-      regPdfUrls[d.id] = URL.createObjectURL(new Blob([await res.arrayBuffer()], {type: 'application/pdf'}));
-    }catch(e){
-      regPdfUrls[d.id] = '';
-      regPdfFailed[d.id] = true;
-    }finally{
-      delete regPdfLoading[d.id];
-    }
-  })();
-  return regPdfLoading[d.id];
-}
-const regPdfFailed = {};
-
-// Fills in the PDF frame and "Open in new tab" link once the document has downloaded.
-function attachRegPdf(){
-  if(view.type !== 'reg') return;
-  const d = libraryDoc(view.id);
-  if(!d) return;
+// Fills in the PDF frame and "Open" links once the document has downloaded.
+// stillHere() says whether the same document is still on screen when the download finishes.
+function attachPdf(path, page, stillHere, failText){
   const apply = () => {
-    if(view.type !== 'reg' || view.id !== d.id) return;
-    const url = pdfUrl(d, view.page || 1);
-    const frame = document.getElementById('reg-frame');
-    const links = document.querySelectorAll('.reg-open-link');
-    const status = document.getElementById('reg-loading');
-    if(regPdfFailed[d.id]){
-      if(status){ status.textContent = `Couldn't load ${d.file} from the data repo. Check it is in the regs/ folder.`; status.classList.add('error'); }
+    if(!stillHere()) return;
+    const status = document.getElementById('pdf-loading');
+    if(pdfBlobs[path] === ''){
+      if(status){ status.textContent = failText; status.classList.add('error'); }
       return;
     }
+    const url = pdfPageUrl(path, page);
     if(!url) return;
+    const frame = document.getElementById('pdf-frame');
     if(frame && frame.dataset.src !== url){ frame.src = url; frame.dataset.src = url; frame.hidden = false; }
-    links.forEach(a => { a.href = url; a.classList.remove('disabled'); a.removeAttribute('aria-disabled'); });
+    document.querySelectorAll('.pdf-open-link').forEach(a => { a.href = url; a.classList.remove('disabled'); a.removeAttribute('aria-disabled'); });
     if(status) status.remove();
   };
-  if(regPdfUrls[d.id] || regPdfFailed[d.id]) apply();
-  else loadRegPdf(d).then(apply);
+  if(path in pdfBlobs) apply();
+  else loadPdfBlob(path).then(apply);
+}
+
+function attachRegPdf(){
+  const d = view.type === 'reg' && libraryDoc(view.id);
+  if(!d) return;
+  attachPdf('regs/' + d.file, view.page || 1, () => view.type === 'reg' && view.id === d.id,
+    `Couldn't load ${d.file} from the data repo. Check it is in the regs/ folder.`);
+}
+
+// Page-by-page search text (regs/index/*.json, atd/index/*.json), loaded once per visit and shared.
+const pageIndexes = {};    // path -> {lower: [], raw: []}
+
+function loadPageIndex(path){
+  if(pageIndexes[path]) return Promise.resolve(pageIndexes[path]);
+  return ghRaw(path).then(r => r.json()).then(json => {
+    const raw = Array.isArray(json.pages) ? json.pages.map(p => String(p || '')) : [];
+    return (pageIndexes[path] = {raw, lower: raw.map(p => p.toLowerCase())});
+  }).catch(() => (pageIndexes[path] = {raw: [], lower: []}));   // missing index: search skips it
+}
+
+// Every page of one document that contains the term: {hits: [{page, n, snippet}], matches}.
+function searchPages(index, t){
+  const hits = [];
+  let matches = 0;
+  index.lower.forEach((lower, i) => {
+    let at = findWordStart(lower, t);
+    if(at < 0) return;
+    const first = at;
+    let n = 0;
+    while(at > -1){ n++; at = findWordStart(lower, t, at + t.length); }
+    matches += n;
+    hits.push({page: i + 1, n, snippet: excerpt(index.raw[i], first, t.length)});
+  });
+  return {hits, matches};
 }
 
 // The library starts collapsed. An authority with an update opens once, so the flag can't hide
@@ -1208,7 +1264,7 @@ function renderRegView(){
   const d = libraryDoc(view.id);
   if(!d) return libraryLoaded ? renderHome() : '<div class="muted">Loading\u2026</div>';
   const page = view.page || 1;
-  const url = pdfUrl(d, page);
+  const url = pdfPageUrl('regs/' + d.file, page);
   const meta = [d.revision, d.asOf ? 'Copy as of ' + fmtDate(d.asOf) : '', d.pages ? countLabel(d.pages, 'page', 'pages') : ''].filter(Boolean).join(' \u00b7 ');
   return `
     ${backLinkHtml()}
@@ -1221,7 +1277,7 @@ function renderRegView(){
       </div>
     </div>
     <div class="detail-actions doc-actions">
-      <a class="btn-text reg-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>
+      <a class="btn-text pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>
       ${d.officialUrl ? `<a class="btn-text" href="${escapeHtml(d.officialUrl)}" target="_blank" rel="noopener noreferrer">${ICON.globe}<span>Official source</span></a>` : ''}
       ${EDITOR ? `
         ${actionBtn('edit', 'Edit', `openLibraryModal('${d.id}')`)}
@@ -1231,17 +1287,15 @@ function renderRegView(){
     ${regStatusNote(d)}
     ${renderRegUsedBy(d)}
     ${EDITOR && !d.indexed ? `<div class="doc-note">This document isn't in the search index yet. Once its PDF is in the data repo's regs/ folder, click Rebuild search index.</div>` : ''}
-    ${url ? '' : `<div class="reg-loading" id="reg-loading">Loading the document&hellip;</div>`}
+    ${url ? '' : `<div class="reg-loading" id="pdf-loading">Loading the document&hellip;</div>`}
     ${isPhone()
-      ? `<a class="btn-primary open-doc-btn reg-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open document</span></a>`
-      : `<iframe class="pdf-frame" id="reg-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(docTitle(d))}"></iframe>`}`;
+      ? `<a class="btn-primary open-doc-btn pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open document</span></a>`
+      : `<iframe class="pdf-frame" id="pdf-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(docTitle(d))}"></iframe>`}`;
 }
 
 // =====================================================================
 // Search: certifications, activities, comments and the regulatory library
 // =====================================================================
-const regIndex = {};          // doc id -> lower-cased page texts (loaded on first search)
-const regIndexRaw = {};       // doc id -> page texts as written (for excerpts)
 let regIndexLoading = null;
 const expandedRegResults = new Set();
 
@@ -1288,24 +1342,17 @@ function searchActivities(t){
 }
 
 // Loads the page texts for every indexed document (regs/index/<id>.json), once per visit.
+const regIndexPath = d => 'regs/index/' + d.id + '.json';
+
 function ensureRegSearch(){
-  const docs = library.documents.filter(d => d.indexed);
-  if(!libraryLoaded || regIndexLoading || docs.every(d => regIndex[d.id])) return;
-  regIndexLoading = Promise.all(docs.filter(d => !regIndex[d.id]).map(async d => {
-    try{
-      const json = await (await ghRaw('regs/index/' + d.id + '.json')).json();
-      const pages = Array.isArray(json.pages) ? json.pages.map(p => String(p || '')) : [];
-      regIndexRaw[d.id] = pages;
-      regIndex[d.id] = pages.map(p => p.toLowerCase());
-    }catch(e){
-      regIndexRaw[d.id] = [];
-      regIndex[d.id] = [];   // missing index: search just skips this document
-    }
-  })).then(() => { regIndexLoading = null; lastDetailHtml = null; render(); });
+  const docs = library.documents.filter(d => d.indexed && !pageIndexes[regIndexPath(d)]);
+  if(!libraryLoaded || regIndexLoading || !docs.length) return;
+  regIndexLoading = Promise.all(docs.map(d => loadPageIndex(regIndexPath(d))))
+    .then(() => { regIndexLoading = null; lastDetailHtml = null; render(); });
 }
 
 function regSearchReady(){
-  return libraryLoaded && library.documents.filter(d => d.indexed).every(d => regIndex[d.id]);
+  return libraryLoaded && library.documents.filter(d => d.indexed).every(d => pageIndexes[regIndexPath(d)]);
 }
 
 function excerpt(text, at, len){
@@ -1316,22 +1363,10 @@ function excerpt(text, at, len){
 }
 
 function searchRegs(t){
-  const out = [];
-  library.documents.filter(d => d.indexed && regIndex[d.id]).forEach(d => {
-    const hits = [];
-    let matches = 0;
-    regIndex[d.id].forEach((lower, i) => {
-      let at = findWordStart(lower, t);
-      if(at < 0) return;
-      const first = at;
-      let n = 0;
-      while(at > -1){ n++; at = findWordStart(lower, t, at + t.length); }
-      matches += n;
-      hits.push({page: i + 1, n, snippet: excerpt(regIndexRaw[d.id][i], first, t.length)});
-    });
-    if(hits.length) out.push({doc: d, hits, matches});
-  });
-  return out.sort((a, b) => textCmp(a.doc.authority, b.doc.authority) || textCmp(a.doc.title, b.doc.title));
+  return library.documents.filter(d => d.indexed && pageIndexes[regIndexPath(d)])
+    .map(d => ({doc: d, ...searchPages(pageIndexes[regIndexPath(d)], t)}))
+    .filter(r => r.hits.length)
+    .sort((a, b) => textCmp(a.doc.authority, b.doc.authority) || textCmp(a.doc.title, b.doc.title));
 }
 
 function highlight(text, term){
