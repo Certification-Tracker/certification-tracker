@@ -747,7 +747,7 @@ function sortListItems(kind, items){
   if(kind === 'cert') return list.sort((a, b) => certSortCmp(a, b) || dateCmp(certDate(a), certDate(b)));
   if(kind === 'act') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(actDate(x.a), actDate(y.a)));
   if(kind === 'comment') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(y.cm.date, x.cm.date));
-  if(kind === 'atd') return atdSorted(list);
+  if(kind === 'atd') return atdOrdered(list);
   return list.sort((a, b) => textCmp(a.name, b.name));
 }
 

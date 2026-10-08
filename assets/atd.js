@@ -98,6 +98,24 @@ function atdSorted(list){
   return [...(list || atd.devices)].sort((a, b) => dateCmp(atdIncomplete(a) ? '' : a.expiration, atdIncomplete(b) ? '' : b.expiration) || textCmp(a.name, b.name));
 }
 
+// Display order: BATD first (just TD/TD2), then AATD; FMX/MCX pinned to the top of its group,
+// the rest alphabetical.
+const ATD_TYPE_ORDER = ['BATD', 'AATD'];
+const atdPinned = d => /\bFMX\b/i.test(d.name) && /\bMCX\b/i.test(d.name);
+const atdTypeRank = d => { const i = ATD_TYPE_ORDER.indexOf(String(d.type || '').toUpperCase()); return i < 0 ? ATD_TYPE_ORDER.length : i; };
+function atdOrdered(list){
+  return [...(list || atd.devices)].sort((a, b) => (atdTypeRank(a) - atdTypeRank(b)) || (atdPinned(b) - atdPinned(a)) || textCmp(a.name, b.name));
+}
+function atdGroups(list){
+  const out = [];
+  atdOrdered(list).forEach(d => {
+    const type = String(d.type || '').toUpperCase() || 'Other';
+    if(!out.length || out[out.length - 1].type !== type) out.push({type, devices: []});
+    out[out.length - 1].devices.push(d);
+  });
+  return out;
+}
+
 // ---- Knowledge base comparison (scripts/check_kb.py) ----
 function kbOf(id){ return kbStatus && kbStatus.devices && kbStatus.devices[id] || null; }
 function kbChecked(){ return kbStatus && kbStatus.checkedAt ? fmtDate(String(kbStatus.checkedAt).slice(0, 10)) : ''; }
@@ -186,7 +204,7 @@ function renderAtdView(){
   if(!atdLoaded) return '<div class="muted">Loading…</div>';
   rowActions = [];
   const src = atd.source || {};
-  const list = atdSorted();
+  const list = atdOrdered();
   const counts = {};
   list.forEach(d => { const b = atdBand(d); counts[b] = (counts[b] || 0) + 1; });
   const meta = [src.file ? escapeHtml(src.file) : '', src.asOf ? 'as of ' + fmtDate(src.asOf) : '', src.importedAt ? 'imported ' + fmtDate(src.importedAt) : '']
@@ -196,20 +214,20 @@ function renderAtdView(){
   const body = list.length ? `
     <div class="atd-table" role="table" aria-label="ATD devices">
       <div class="atd-tr atd-th" role="row"><span role="columnheader">Device</span><span role="columnheader">Approved QAG</span><span role="columnheader">Expires</span><span role="columnheader">Resubmit by</span><span role="columnheader">Status</span><span role="columnheader">${EDITOR ? 'Knowledge base' : 'Documents'}</span></div>
-      ${list.map(d => {
+      ${atdGroups(list).map(g => `<div class="atd-group" role="row"><span role="cell">${escapeHtml(g.type)} <span class="title-count">(${g.devices.length})</span></span></div>` + g.devices.map(d => {
         rowActions.push({type: 'atd', id: d.id});
         const days = atdDays(d);
         const files = ['loa', 'qag'].filter(k => kbFile(d, k)).map(k => k.toUpperCase()).join(', ');
         return `
         <button class="atd-tr" type="button" role="row" onclick="openRow(${rowActions.length - 1})">
-          <span role="cell"><b>${escapeHtml(d.name)}</b> <span class="row-sub">${escapeHtml(d.type || '')}</span></span>
+          <span role="cell"><b>${escapeHtml(d.name)}</b></span>
           <span role="cell">${vLabel(d.version)}${atdPending(d) ? `<span class="row-sub atd-sub">${vLabel(d.submittedVersion)} submitted${d.submittedDate ? ' ' + fmtDate(d.submittedDate) : ''}</span>` : ''}</span>
           <span role="cell">${atdIncomplete(d) ? `<span class="row-sub">${escapeHtml(d.expirationText || 'TBA')}</span>` : `${fmtDate(d.expiration)}<span class="row-sub atd-sub">${days < 0 ? `Expired ${(-days).toLocaleString()} days ago` : `${days.toLocaleString()} ${days === 1 ? 'day' : 'days'}`}</span>`}</span>
           <span role="cell">${atdIncomplete(d) ? '<span class="row-sub">—</span>' : fmtDate(atdResubmitBy(d))}</span>
           <span role="cell">${bandPill(d)}${atdPending(d) ? '<span class="pill pill-slate">Pending</span>' : ''}</span>
           <span role="cell">${EDITOR ? `${kbPill(d)}${kbDiffs(d).length ? `<span class="row-sub atd-sub">${kbDiffs(d).map(x => `KB: ${escapeHtml(x.kb)}`).join(', ')}</span>` : ''}` : (files ? escapeHtml(files) : '<span class="row-sub">—</span>')}</span>
         </button>`;
-      }).join('')}
+      }).join('')).join('')}
     </div>` : `<div class="muted list-empty">${EDITOR ? 'No devices yet. Import FAA_Approval_Tracker.xlsx to start.' : 'No devices yet.'}</div>`;
   return `
     <div class="detail-context">FAA ATD approvals</div>
@@ -225,7 +243,7 @@ function renderAtdView(){
     ${notFound.length ? `<div class="reg-note muted-note">Not found in the knowledge base: ${notFound.map(d => escapeHtml(d.name)).join(', ')}. Open a device and use Edit to add its article link.</div>` : ''}
     <div class="atd-chips">${['green', 'yellow', 'red', 'expired', 'incomplete'].filter(b => counts[b]).map(b => `<span class="pill pill-${ATD_BANDS[b].cls}" title="${ATD_BANDS[b].hint}">${counts[b]} ${ATD_BANDS[b].label.toLowerCase()}</span>`).join('')}${list.filter(atdPending).length ? `<span class="pill pill-slate">${list.filter(atdPending).length} pending</span>` : ''}</div>
     ${body}
-    <div class="muted search-note">Sorted by expiration, soonest first. Green: over 365 days to expiry; yellow: 180 to 365; red: under 180. Resubmit by is 180 days before expiry.</div>`;
+    <div class="muted search-note">BATD first, then AATD; FMX/MCX at the top of AATD, the rest alphabetical. Green: over 365 days to expiry; yellow: 180 to 365; red: under 180. Resubmit by is 180 days before expiry.</div>`;
 }
 
 // One device: approval details, then its LOA and QAG from the knowledge base in the main panel.
@@ -379,7 +397,7 @@ function ensureAtdSearch(){
 function atdSearchReady(){ return atdLoaded && atdDocsIndexed().every(x => atdIndex[x.file.path]); }
 
 function searchAtd(t){
-  const devices = atdSorted(atd.devices.filter(d => [d.name, d.type, d.version, d.submittedVersion, d.notes].some(v => textHas(v, t))));
+  const devices = atdOrdered(atd.devices.filter(d => [d.name, d.type, d.version, d.submittedVersion, d.notes].some(v => textHas(v, t))));
   const docs = [];
   atdDocsIndexed().forEach(x => {
     const pages = atdIndex[x.file.path];

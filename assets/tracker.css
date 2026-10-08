@@ -804,3 +804,4 @@ button.atd-tr:hover{background:var(--hover);border-color:var(--line);}
 .atd-cert-list label{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:3px 0;font-weight:400;}
 .kb-alert-row .text-link{justify-self:start;text-align:left;}
 .field-grid + .reg-note{margin-top:14px;}
+.atd-group{padding:14px 6px 6px;font-size:15px;font-weight:700;color:var(--ink);border-bottom:1px solid var(--line-strong);}
