@@ -805,3 +805,30 @@ button.atd-tr:hover{background:var(--hover);border-color:var(--line);}
 .kb-alert-row .text-link{justify-self:start;text-align:left;}
 .field-grid + .reg-note{margin-top:14px;}
 .atd-group{padding:14px 6px 6px;font-size:15px;font-weight:700;color:var(--ink);border-bottom:1px solid var(--line-strong);}
+/* Home summary cards (3.1) */
+.home-cards{display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:12px;margin-top:14px;align-items:start;}
+.home-card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0;}
+.home-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:15px;margin-bottom:6px;}
+.home-card-head .text-link,.home-card-note{font-size:13px;}
+.home-card-note{color:var(--ink-faint);}
+.home-chips{margin:0 0 6px;}
+.home-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:baseline;width:100%;background:none;border:none;border-top:1px solid var(--line);border-radius:0;padding:7px 0;font-size:14px;color:var(--ink);text-align:left;}
+.home-row:hover{background:none;border-color:var(--line);}
+.home-row:hover .home-row-text{text-decoration:underline;}
+.home-tag{margin-right:0;white-space:nowrap;}
+.home-row-text{min-width:0;overflow-wrap:anywhere;}
+.home-row-side{font-size:13px;color:var(--ink-faint);text-align:right;white-space:nowrap;}
+.home-clear{font-size:13px;color:var(--ink-faint);padding:7px 0 2px;border-top:1px solid var(--line);}
+.home-more{font-size:13px;padding:7px 0 2px;border-top:1px solid var(--line);color:var(--ink-faint);}
+@media (max-width: 640px){ .home-row{grid-template-columns:auto minmax(0,1fr);} .home-row-side{grid-column:2;text-align:left;} }
+/* v2 change log in the editor (3.1) */
+.v2log{margin-top:10px;}
+.v2log .ver{padding:14px 0;}
+.v2log .ver + .ver{border-top:1px solid var(--line);}
+.v2log .vh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;font-size:inherit;font-weight:400;}
+.v2log .vn{font-family:var(--serif);font-size:18px;font-weight:700;color:var(--ink);}
+.v2log .vd{font-size:14px;color:var(--ink-faint);}
+.v2log .cur{display:none;}
+.v2log .grp{font-size:12px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.05em;margin:12px 0 4px;}
+.v2log ul{margin:0;padding-left:20px;font-size:14px;color:var(--ink-soft);}
+.v2log li{margin:3px 0;}

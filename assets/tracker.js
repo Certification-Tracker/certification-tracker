@@ -65,6 +65,7 @@ function parseHash(){
   if(!h) return {type: 'home'};
   if(h.startsWith('list/')) return {type: 'list', key: h.slice(5)};
   if(h === 'atd') return {type: 'atd'};
+  if(h === 'v2-changelog') return {type: 'v2log'};
   if(h.startsWith('atd/')){
     const m = h.slice(4).match(/^([^/]+)(?:\/(loa|qag))?(?:\/p(\d+))?$/);
     return m ? {type: 'atd-dev', id: m[1], doc: m[2] || '', page: Number(m[3]) || 1} : {type: 'atd'};
@@ -88,6 +89,7 @@ function viewHash(v){
   if(v.type === 'doc') return 'doc/' + v.cert + '/' + v.doc;
   if(v.type === 'reg') return 'reg/' + v.id + (v.page > 1 ? '/p' + v.page : '');
   if(v.type === 'atd') return 'atd';
+  if(v.type === 'v2log') return 'v2-changelog';
   if(v.type === 'atd-dev') return 'atd/' + v.id + (v.doc ? '/' + v.doc : '') + (v.doc && v.page > 1 ? '/p' + v.page : '');
   return '';
 }
@@ -168,6 +170,7 @@ function render(){
   if(view.type === 'cert' && !certs.some(c => c.id === view.id)) view = {type: 'home'};
   if(view.type === 'reg' && libraryLoaded && !libraryDoc(view.id)) view = {type: 'home'};
   if(view.type === 'atd-dev' && atdLoaded && !atdDevice(view.id)) view = {type: 'atd'};
+  if(view.type === 'v2log' && !EDITOR) view = {type: 'home'};
   if(view.type === 'doc' && !findCertDoc(view.cert, view.doc)) view = certs.some(c => c.id === view.cert) ? {type: 'cert', id: view.cert} : {type: 'home'};
   const activeCert = view.type === 'cert' ? certs.find(c => c.id === view.id)
     : view.type === 'doc' ? certs.find(c => c.id === view.cert) : null;
@@ -207,6 +210,7 @@ function renderMain(activeCert){
   if(view.type === 'reg') return renderRegView();
   if(view.type === 'doc' && activeCert) return renderDrivePreview(activeCert);
   if(view.type === 'atd') return renderAtdView();
+  if(view.type === 'v2log' && EDITOR) return renderV2Log();
   if(view.type === 'atd-dev') return renderAtdDevice();
   return renderHome();
 }
@@ -224,19 +228,123 @@ function afterRender(){
   if(view.type === 'search'){ ensureRegSearch(); ensureAtdSearch(); }
   if(view.type === 'reg') attachRegPdf();
   if(view.type === 'atd-dev') attachAtdPdf();
+  if(view.type === 'v2log' && EDITOR) loadV2Log();
 }
 
 function renderHome(){
+  rowActions = [];
   const customers = new Set(certs.map(customerKey)).size;
   const docs = library.documents.length;
   return `
     <div class="home">
       <h2 class="home-title">Certification Tracker <span class="home-version">${VERSION}</span></h2>
       <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ` \u00b7 <button class="text-link" type="button" onclick="openAtd()">${countLabel(atd.devices.length, 'ATD device', 'ATD devices')}</button>` : ''}</p>
-      ${renderRegUpdatesHome()}
-      ${renderAtdHome()}
+      ${renderKbBehindNotice()}
+      <div class="home-cards">
+        ${renderCertsHome()}
+        ${renderAtdHome()}
+        ${renderRegHome()}
+      </div>
       <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, click a box above to list what it counts, or search (press <kbd>/</kbd>).</p>
     </div>`;
+}
+
+// ---- v2 change log (editor only): archived in the private data repo at archive/changelog-v2.html ----
+let v2LogHtml = null;
+let v2LogLoading = false;
+
+function loadV2Log(){
+  if(v2LogHtml !== null || v2LogLoading) return;
+  v2LogLoading = true;
+  ghRaw('archive/changelog-v2.html')
+    .then(res => res.text())
+    .then(t => { v2LogHtml = t.replace(/<script\b[\s\S]*?<\/script>/gi, '').replace(/<!--[\s\S]*?-->/g, ''); })
+    .catch(() => { v2LogHtml = ''; })
+    .finally(() => { v2LogLoading = false; lastDetailHtml = null; render(); });
+}
+
+function renderV2Log(){
+  return `
+    <div class="detail-context">Editor / Archive</div>
+    <h2 class="detail-title">v2 change log</h2>
+    <div class="doc-meta">v2.1.1 to v2.5.0, the tracker before v3. For each version's code, see <a href="${V2_ARCHIVE_URL}" target="_blank" rel="noopener">v2 revision history</a>.</div>
+    <div class="v2log">${v2LogHtml === null ? '<div class="muted list-empty">Loading\u2026</div>'
+      : v2LogHtml || '<div class="muted list-empty">Couldn\u2019t load archive/changelog-v2.html from the data repo.</div>'}</div>`;
+}
+
+// ---- Home summary cards: what needs attention in each sidebar section ----
+const HOME_ROWS_MAX = 6;
+
+function homeCard(title, headRight, body){
+  return `<section class="home-card"><div class="home-card-head"><b>${title}</b>${headRight || ''}</div>${body}</section>`;
+}
+
+// tag: why the row is there; action: what clicking it opens (see openRow).
+function homeRow(tag, cls, text, side, action){
+  rowActions.push(action);
+  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="pill pill-${cls} home-tag">${escapeHtml(tag)}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
+}
+
+function homeClear(text){ return `<div class="home-clear">${text}</div>`; }
+
+function renderCertsHome(){
+  if(!certs.length) return '';
+  const today = localToday(), week = isoAddDays(today, 7);
+  const acts = allActivities().filter(x => activityGroupOf(x.a) !== 'Complete');
+  const certOverdue = sortCerts(certs.filter(isOverdue));
+  const actOverdue = acts.filter(x => isActivityOverdue(x.a)).sort((x, y) => dateCmp(x.a.dateDue, y.a.dateDue));
+  const actWeek = acts.filter(x => !isActivityOverdue(x.a) && x.a.dateDue && x.a.dateDue >= today && x.a.dateDue <= week).sort((x, y) => dateCmp(x.a.dateDue, y.a.dateDue));
+  const certDue = certsDueWithin(30).sort((a, b) => dateCmp(a.date, b.date));
+  const qualExpired = certs.filter(c => { const n = daysUntil(qual(c).expiryDate); return (n !== null && n < 0) || qual(c).status === 'Expired'; });
+  const qualExp = certs.filter(c => dateWithin(qual(c).expiryDate, 90)).sort((a, b) => dateCmp(qual(a).expiryDate, qual(b).expiryDate));
+  const qualCond = certs.filter(c => qual(c).status === 'Conditional');
+  // Waiting: oldest first; several from one certification share a row.
+  const waitingByCert = {};
+  acts.filter(x => activityGroupOf(x.a) === 'Waiting').forEach(x => (waitingByCert[x.c.id] = waitingByCert[x.c.id] || []).push(x));
+  const waiting = Object.values(waitingByCert).map(list => {
+    const dated = list.map(x => x.a.waitingSince).filter(Boolean).sort();
+    return {list, since: dated[0] || ''};
+  }).sort((a, b) => dateCmp(a.since, b.since) || textCmp(customerKey(a.list[0].c), customerKey(b.list[0].c)));
+
+  const who = c => escapeHtml(customerKey(c));
+  const actText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(x.a.description || x.a.text, 90))}`;
+  const actAction = x => ({type: 'act', certId: x.c.id, activityId: x.a.id});
+  const rows = [
+    ...certOverdue.map(c => homeRow('Overdue', 'overdue', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'due ' + fmtDate(c.date), {type: 'cert', id: c.id})),
+    ...actOverdue.map(x => homeRow('Overdue', 'overdue', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x))),
+    ...qualExpired.map(c => homeRow('Expired', 'overdue', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, qual(c).expiryDate ? 'expired ' + fmtDate(qual(c).expiryDate) : 'qualification', {type: 'cert', id: c.id})),
+    ...actWeek.map(x => homeRow('Due this week', 'slate', actText(x), fmtDate(x.a.dateDue), actAction(x))),
+    ...qualExp.map(c => homeRow('Expiring', 'gold', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'expires ' + fmtDate(qual(c).expiryDate), {type: 'cert', id: c.id})),
+    ...certDue.map(c => homeRow('Due in 30 days', 'slate', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, fmtDate(c.date), {type: 'cert', id: c.id})),
+    ...qualCond.map(c => homeRow('Conditional', 'gold', `${who(c)} \u00b7 ${escapeHtml(certName(c))}`, 'qualification', {type: 'cert', id: c.id})),
+    ...waiting.map(w => homeRow('Waiting', 'plum', w.list.length > 1 ? `${who(w.list[0].c)} \u00b7 ${w.list.length} activities` : actText(w.list[0]),
+      w.since ? 'since ' + fmtDate(w.since) : 'no date', actAction(w.list[0])))
+  ];
+  const clear = [];
+  if(!certOverdue.length && !actOverdue.length) clear.push('Nothing overdue');
+  if(!actWeek.length) clear.push('no activities due this week');
+  if(!certDue.length) clear.push('no certifications due in 30 days');
+  if(!qualExp.length && !qualExpired.length) clear.push('no qualifications expiring in 90 days');
+  if(clear.length) clear[0] = clear[0][0].toUpperCase() + clear[0].slice(1);
+  const lists = [['certs-overdue', certOverdue.length], ['act-overdue', actOverdue.length], ['act-week', actWeek.length], ['certs-due30', certDue.length],
+    ['qual-exp90', qualExp.length], ['qual-cond', qualCond.length], ['act-wait', waiting.reduce((n, w) => n + w.list.length, 0)]].filter(([, n]) => n);
+  const more = rows.length > HOME_ROWS_MAX
+    ? `<div class="home-more">Show all: ${lists.map(([k, n]) => `<button class="text-link" type="button" onclick="navigate({type: 'list', key: '${k}'})">${escapeHtml(summaryMeasure(k).label)} (${n})</button>`).join(' \u00b7 ')}</div>` : '';
+  return homeCard('Certifications and activities', `<button class="text-link" type="button" onclick="navigate({type: 'list', key: 'act-open'})">${countLabel(acts.length, 'open activity', 'open activities')}</button>`,
+    rows.slice(0, HOME_ROWS_MAX).join('') + more + (clear.length ? homeClear(clear.join(' \u00b7 ')) : ''));
+}
+
+function renderRegHome(){
+  if(!library.documents.length) return '';
+  const ups = regUpdates();
+  const failed = EDITOR ? library.documents.filter(d => (regCheck(d.id) || {}).status === 'error') : [];
+  const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
+  const rows = [
+    ...ups.map(d => homeRow('Update', 'gold', escapeHtml(docTitle(d)), `${escapeHtml(regCheck(d.id).latest || 'newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}`, {type: 'reg', id: d.id, page: 1})),
+    ...failed.map(d => homeRow('Check failed', 'neutral', escapeHtml(docTitle(d)), 'will retry next week', {type: 'reg', id: d.id, page: 1}))
+  ];
+  return homeCard('Regulatory library', `<span class="home-card-note">${countLabel(library.documents.length, 'document', 'documents')}</span>`,
+    rows.join('') + (ups.length ? '' : homeClear(when ? `All current \u00b7 checked ${when}` : 'Not checked yet')));
 }
 
 function countLabel(n, one, many){

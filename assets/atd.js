@@ -63,6 +63,11 @@ function cmpVersion(a, b){
   return ka.letter === kb.letter ? 0 : (ka.letter < kb.letter ? -1 : 1);
 }
 
+// "v4.13 submitted Aug 18, 2026 · FAA #20261006-83327"
+function submittedText(d){
+  return `${vLabel(d.submittedVersion)} submitted${d.submittedDate ? ' ' + fmtDate(d.submittedDate) : ''}${d.faaTracking ? ' \u00b7 FAA #' + escapeHtml(d.faaTracking) : ''}`;
+}
+
 const vLabel = v => v ? 'v' + String(v).replace(/^v\.?\s*/i, '') : '—';
 
 // ---- Status ----
@@ -178,25 +183,23 @@ function renderKbBehindNotice(){
     </div>`;
 }
 
-// Home page card.
+// Home page card (one of the home summary cards; see renderHome in tracker.js).
 function renderAtdHome(){
   if(!atdLoaded || !atd.devices.length) return '';
   const counts = {green: 0, yellow: 0, red: 0, expired: 0, incomplete: 0};
   atd.devices.forEach(d => counts[atdBand(d)]++);
   const warn = atdSorted(atd.devices.filter(d => ['yellow', 'red', 'expired'].includes(atdBand(d))));
   const next = atdSorted(atd.devices.filter(d => !atdIncomplete(d) && !atdPending(d)))[0];
-  const pending = atdSorted(atd.devices.filter(atdPending));
+  const pending = atdOrdered(atd.devices.filter(atdPending));
   const chip = (n, label, cls) => `<span class="pill pill-${n ? cls : 'neutral'}">${n} ${label}</span>`;
-  const row = (d, right) => `<button class="atd-home-row" type="button" onclick="openAtdDevice('${d.id}')"><span>${escapeHtml(d.name)}</span><span class="atd-home-what">${right}</span></button>`;
-  return `
-    ${renderKbBehindNotice()}
-    <div class="atd-home">
-      <div class="atd-home-head"><b>FAA ATD approvals</b><button class="text-link" type="button" onclick="openAtd()">Open ATD devices ${ICON.arrowRight}</button></div>
-      <div class="atd-chips">${chip(counts.green, 'green', 'sage')}${chip(counts.yellow, 'yellow', 'gold')}${chip(counts.red + counts.expired, 'red', 'overdue')}${counts.incomplete ? chip(counts.incomplete, 'incomplete', 'neutral') : ''}</div>
-      ${warn.map(d => row(d, `${bandPill(d)}Expires ${fmtDate(d.expiration)} · resubmit by ${fmtDate(atdResubmitBy(d))}`)).join('')}
-      ${next && !warn.includes(next) ? row(next, `Next resubmit by ${fmtDate(atdResubmitBy(next))}`) : ''}
-      ${pending.map(d => row(d, `${vLabel(d.submittedVersion)} submitted${d.submittedDate ? ' ' + fmtDate(d.submittedDate) : ''}`)).join('')}
-    </div>`;
+  const act = d => ({type: 'atd', id: d.id});
+  const rows = [
+    ...warn.map(d => homeRow(ATD_BANDS[atdBand(d)].label, ATD_BANDS[atdBand(d)].cls, escapeHtml(d.name), `expires ${fmtDate(d.expiration)} \u00b7 resubmit by ${fmtDate(atdResubmitBy(d))}`, act(d))),
+    ...pending.map(d => homeRow('Pending', 'slate', `${escapeHtml(d.name)} \u00b7 ${vLabel(d.submittedVersion)}${d.faaTracking ? ` <span class="row-sub">FAA #${escapeHtml(d.faaTracking)}</span>` : ''}`, d.submittedDate ? 'submitted ' + fmtDate(d.submittedDate) : 'submitted', act(d))),
+    ...(next && !warn.includes(next) ? [homeRow('Next resubmit', 'neutral', escapeHtml(next.name), 'by ' + fmtDate(atdResubmitBy(next)), act(next))] : [])
+  ];
+  return homeCard('FAA ATD approvals', `<button class="text-link" type="button" onclick="openAtd()">Open ATD devices ${ICON.arrowRight}</button>`,
+    `<div class="atd-chips home-chips">${chip(counts.green, 'green', 'sage')}${chip(counts.yellow, 'yellow', 'gold')}${chip(counts.red + counts.expired, 'red', 'overdue')}${counts.incomplete ? chip(counts.incomplete, 'incomplete', 'neutral') : ''}</div>${rows.join('')}`);
 }
 
 // The ATD devices page.
@@ -221,7 +224,7 @@ function renderAtdView(){
         return `
         <button class="atd-tr" type="button" role="row" onclick="openRow(${rowActions.length - 1})">
           <span role="cell"><b>${escapeHtml(d.name)}</b></span>
-          <span role="cell">${vLabel(d.version)}${atdPending(d) ? `<span class="row-sub atd-sub">${vLabel(d.submittedVersion)} submitted${d.submittedDate ? ' ' + fmtDate(d.submittedDate) : ''}</span>` : ''}</span>
+          <span role="cell">${vLabel(d.version)}${atdPending(d) ? `<span class="row-sub atd-sub">${submittedText(d)}</span>` : ''}</span>
           <span role="cell">${atdIncomplete(d) ? `<span class="row-sub">${escapeHtml(d.expirationText || 'TBA')}</span>` : `${fmtDate(d.expiration)}<span class="row-sub atd-sub">${days < 0 ? `Expired ${(-days).toLocaleString()} days ago` : `${days.toLocaleString()} ${days === 1 ? 'day' : 'days'}`}</span>`}</span>
           <span role="cell">${atdIncomplete(d) ? '<span class="row-sub">—</span>' : fmtDate(atdResubmitBy(d))}</span>
           <span role="cell">${bandPill(d)}${atdPending(d) ? '<span class="pill pill-slate">Pending</span>' : ''}</span>
@@ -294,6 +297,7 @@ function renderAtdDevice(){
       ${field('Resubmit by', atdIncomplete(d) ? '—' : fmtDate(atdResubmitBy(d)))}
       ${field('Original approval', d.originalApproval ? fmtDate(d.originalApproval) : escapeHtml(d.originalApprovalText || '—'))}
       ${field('Submitted', d.submittedVersion ? `${vLabel(d.submittedVersion)}${d.submittedDate ? ', ' + fmtDate(d.submittedDate) : ''}${atdPending(d) ? '' : ' (approved)'}` : '—')}
+      ${field('FAA tracking #', d.faaTracking ? escapeHtml(d.faaTracking) : '—')}
       ${d.notes ? `<div class="span-all"><div class="fk">Notes</div><div class="fv">${escapeHtml(d.notes)}</div></div>` : ''}
       <div class="span-all"><div class="fk">Linked certification projects</div><div class="fv">${linked.length ? linked.map(c => `<button class="text-link" type="button" onclick="selectCert('${c.id}')">${escapeHtml(certName(c))}</button>`).join(', ') : 'None'}</div></div>
     </div>
@@ -360,7 +364,7 @@ function atdLine(d){
 
 function atdRowSide(d){
   if(atdIncomplete(d)) return 'Incomplete';
-  if(atdPending(d)) return `${vLabel(d.submittedVersion)} submitted${d.submittedDate ? ' ' + fmtDate(d.submittedDate) : ''}`;
+  if(atdPending(d)) return submittedText(d);
   return `Resubmit by ${fmtDate(atdResubmitBy(d))}`;
 }
 
@@ -397,7 +401,7 @@ function ensureAtdSearch(){
 function atdSearchReady(){ return atdLoaded && atdDocsIndexed().every(x => atdIndex[x.file.path]); }
 
 function searchAtd(t){
-  const devices = atdOrdered(atd.devices.filter(d => [d.name, d.type, d.version, d.submittedVersion, d.notes].some(v => textHas(v, t))));
+  const devices = atdOrdered(atd.devices.filter(d => [d.name, d.type, d.version, d.submittedVersion, d.faaTracking, d.notes].some(v => textHas(v, t))));
   const docs = [];
   atdDocsIndexed().forEach(x => {
     const pages = atdIndex[x.file.path];
@@ -484,7 +488,9 @@ function parseAtdRows(rows){
     expiration: col(h => h.startsWith('expiration')),
     resubmitted: col(h => h === 'resubmitted' || h === 'submitted' || h === 'submitteddate'),
     status: col(h => /^st\w*us$/.test(h)),
-    notes: col(h => h === 'notes')
+    notes: col(h => h === 'notes'),
+    // FAA tracking number for a submission (e.g. 20261006-83327); the sheet's "Submission Tracker" column works too.
+    tracking: col(h => h.includes('tracking') || h === 'submissiontracker' || h === 'faatrackingnumber')
   };
   if(cols.version < 0 || cols.expiration < 0) throw new Error('The sheet needs Version and EXPIRATION columns.');
   let asOf = '';
@@ -524,6 +530,7 @@ function parseAtdRows(rows){
       expiration: excelDate(expRaw),
       expirationText: excelDate(expRaw) ? '' : text(expRaw),
       notes,
+      faaTracking: /\d/.test(text(get(r, 'tracking'))) ? text(get(r, 'tracking')).replace(/^#\s*/, '') : '',
       status: incomplete ? 'Incomplete' : 'Current'
     });
   });
@@ -534,7 +541,7 @@ function parseAtdRows(rows){
 const ATD_FIELDS = [
   ['type', 'Type'], ['version', 'Approved QAG'], ['submittedVersion', 'Submitted version'], ['submittedDate', 'Submitted'],
   ['originalApproval', 'Original approval'], ['currentApproval', 'Current approval'], ['expiration', 'Expiration'],
-  ['expirationText', 'Expiration note'], ['notes', 'Notes'], ['status', 'Status']
+  ['expirationText', 'Expiration note'], ['faaTracking', 'FAA tracking #'], ['notes', 'Notes'], ['status', 'Status']
 ];
 
 // What an import would change: {added, changed: [{device, fields: [[label, old, new]]}], removed, unchanged}.

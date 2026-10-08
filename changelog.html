@@ -42,15 +42,18 @@
         <h3 class="grp">Added</h3>
         <ul>
           <li>FAA ATD approvals: an ATD devices page for Redbird ATD QAG and LOA status, grouped BATD then AATD (FMX/MCX first, the rest alphabetical), with days to expiry, a green/yellow/red status (over 365 days, 180 to 365, under 180), a resubmit-by date 180 days before expiry, and pending submissions.</li>
+          <li>Pending submissions show the FAA tracking number (for example 20261006-83327) from a tracking column in the spreadsheet; the existing Submission Tracker column works too.</li>
           <li>Spreadsheet import in the editor: upload FAA_Approval_Tracker.xlsx and review what's new, changed or removed before saving.</li>
           <li>Device pages show each device's LOA and QAG from the Redbird knowledge base in the main panel, with Open in knowledge base, and link to related certification projects.</li>
           <li>Weekly knowledge base check: finds each device's QAG/LOA article, stores copies of the documents and compares the QAG version, LOA date and expiration with the spreadsheet. Differences are flagged in the editor; the spreadsheet is never changed.</li>
           <li>When the knowledge base is behind the spreadsheet: a notice in the editor, a count on ATD devices in the sidebar, and a GitHub issue (emailed) that closes on its own once the knowledge base is updated.</li>
-          <li>ATD on the home page, a FAA ATD approvals section in the sidebar, and summary bar boxes: ATD resubmit due, ATD pending, ATD under 365 days, and (editor) KB behind spreadsheet.</li>
+          <li>Home page summary: a card for each sidebar section listing what needs attention, each row labeled with why it's there (overdue, due this week, waiting, expiring, conditional, pending, next resubmit, regulatory updates), with an all-clear line when nothing does.</li>
+          <li>A FAA ATD approvals section in the sidebar, and summary bar boxes: ATD resubmit due, ATD pending, ATD under 365 days, and (editor) KB behind spreadsheet.</li>
           <li>Search covers ATD devices and the text of their LOAs and QAGs.</li>
         </ul>
         <h3 class="grp">Changed</h3>
         <ul>
+          <li>The v2 change log moved to the private data repo and is shown in the editor only (footer: v2 change log). This page lists v3 changes.</li>
           <li>The weekly check now runs both the regulatory check and the knowledge base check, and uses the current versions of GitHub's actions.</li>
         </ul>
         <h3 class="grp">Fixed</h3>
@@ -79,237 +82,8 @@
           <li>The full v2 history is kept in a private archive, linked as v2 revision history in the editor&#x27;s footer.</li>
         </ul>
       </section>
-      <section class="ver" id="v2.5.0">
-        <h2 class="vh"><span class="vn">v2.5.0</span> <span class="vd">Oct 7, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Home page. The tracker opens on a home page instead of the first certification. Click the title or Home in the sidebar to return to it.</li>
-          <li>Customizable summary bar. Click Customize to choose what each box shows, add or remove boxes (up to 8), and reorder them with the arrows or by dragging. Your choices are saved in your browser; Reset to default brings back the standard five.</li>
-          <li>New measures for the summary bar, including counts by authority and level, open, overdue and waiting activities, activities waiting over 14 days, and recent comments.</li>
-          <li>Click a summary box to list what it counts in the main panel, sorted by customer, SN, authority, then date. Opening an item from the list gives you a link back to it.</li>
-          <li>Regulatory library in the sidebar: FAA, EASA, UK CAA and Transport Canada documents open in the main panel, with links to open them in a new tab or go to the official source.</li>
-          <li>Search from the header (press / to jump to it) across customers, SNs, activities, comments and the full text of the regulatory library. Clicking a regulation result opens the document at that page.</li>
-          <li>Search suggestions: clicking into the search box shows your three most frequent searches.</li>
-          <li>Editor: add, edit and remove library documents, with their search index built automatically, and an admin panel to clear everyone&#x27;s search history.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Summary boxes take a single line each, leaving more room for the main panel.</li>
-          <li>Total is now called All certifications.</li>
-          <li>Activities set to Waiting record the date, which the Waiting over 14 days count uses.</li>
-          <li>Behind the scenes, the two tracker pages now share one set of styles and code, so they load faster after the first visit and stay consistent. No visible changes.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.9">
-        <h2 class="vh"><span class="vn">v2.4.9</span> <span class="vd">Oct 6, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Waiting status for activities, for when you&#x27;re waiting on another party. Waiting activities have a purple tag.</li>
-          <li>Activities are grouped by status into expandable lines: Not Started, In Progress, Waiting and Completed. Groups start collapsed, and each line shows how many activities it holds, how many are overdue, and the next due date (or the latest completion for Completed).</li>
-          <li>Reopen button on completed activities, which sets them back to In Progress.</li>
-          <li>Reopening an activity, with the button or through Edit, adds a comment noting when it had been completed.</li>
-          <li>Expand all / Collapse all buttons for the customer list and for each certification&#x27;s activities. Items can still be opened and closed one at a time.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>The Pending activity status is now called Not Started, and new activities start as Not Started. Existing Pending activities are renamed automatically.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.8">
-        <h2 class="vh"><span class="vn">v2.4.8</span> <span class="vd">Oct 6, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Comments on activities. Each activity has a Comments link that opens a running thread of dated, timestamped comments. Add and delete comments in the editor; the view-only page shows them read-only.</li>
-          <li>Bullet points in activities and comments. Start a line with a dash (- ) or an asterisk (* ), or paste in &bull; bullets, and those lines show as a bulleted list.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Line breaks in activity descriptions are now shown. They were always saved but displayed as one line.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.7">
-        <h2 class="vh"><span class="vn">v2.4.7</span> <span class="vd">Oct 6, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Each certification has its own link you can bookmark or share.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Refreshing the page keeps the certification you were viewing, and customers you&#x27;d expanded stay open.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.6">
-        <h2 class="vh"><span class="vn">v2.4.6</span> <span class="vd">Sep 25, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Add customer button below the customer list, for starting a new customer.</li>
-          <li>Changes saved in the editor show up straight away in other tracker tabs open in the same browser.</li>
-          <li>Tracker pages check for the latest data when you return to their tab.</li>
-          <li>A note at the top of the editor when it&#x27;s already open in another tab.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Customers are listed alphabetically.</li>
-          <li>Customer counts in the sidebar include only open certifications. Customers with none show a grey 0.</li>
-          <li>Completed certifications show a green Completed tag next to the serial number instead of a check mark.</li>
-          <li>Each customer&#x27;s Add certification button is now Add project, with the customer filled in.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.5">
-        <h2 class="vh"><span class="vn">v2.4.5</span> <span class="vd">Sep 25, 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Mark a certification complete. Completed certifications get a green check in the sidebar, move to the bottom of each customer&#x27;s list, and show the date they were completed.</li>
-          <li>New Completed count in the summary boxes. Completed certifications no longer count as overdue or due soon.</li>
-          <li>This change log, linked from the version number at the bottom of each page.</li>
-          <li>Deleting a certification now asks for confirmation first.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Some certification details are now shown only in the editor.</li>
-          <li>Behind-the-scenes tidy-up of the page code. No visible changes.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Signing in from the view-only page now opens the editor in its new location.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.4">
-        <h2 class="vh"><span class="vn">v2.4.4</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Certification names are generated automatically from the authority, level, aircraft and SIM model. You can still type your own name.</li>
-          <li>SIM model field, read automatically from the SIM serial number.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Certifications in the sidebar use grey shading when hovered or selected.</li>
-          <li>Settings gear is Redbird red, with a red outline on hover.</li>
-          <li>Removed the “Certifications” heading above the customer list.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.3">
-        <h2 class="vh"><span class="vn">v2.4.3</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Dark mode: the selected customer is highlighted in Redbird red.</li>
-          <li>Edit, View and Add buttons get a blue outline on hover. Red is now reserved for Delete.</li>
-          <li>Save buttons, links, the settings gear and focus outlines are blue.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Form fields no longer take on the red page background in light mode.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.2">
-        <h2 class="vh"><span class="vn">v2.4.2</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>View button for documents that have a link.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Light mode uses a Redbird red background with grey-outlined cards.</li>
-          <li>The selected customer and certification are shown in bold red in the sidebar.</li>
-          <li>Delete buttons are red.</li>
-          <li>Document names are plain text instead of links.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.1">
-        <h2 class="vh"><span class="vn">v2.4.1</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Refined light and dark colors: black background with slate cards and red outlines in dark mode.</li>
-          <li>Grey shading on hover, customer names turn bold red on hover, and button outlines take their color on hover.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.4.0">
-        <h2 class="vh"><span class="vn">v2.4.0</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Light and dark mode that follow your device setting, in Redbird colors.</li>
-        </ul>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Add, Edit, Delete and Complete links replaced with buttons.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Consistent text sizes across Documents, Change Log and Activities.</li>
-          <li>Better display on phones.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.3.1">
-        <h2 class="vh"><span class="vn">v2.3.1</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Document Change Log entries can be added, edited and deleted.</li>
-        </ul>
-        <h3 class="grp">Fixed</h3>
-        <ul>
-          <li>Completed activities no longer show as overdue. Late completions show how many days late they were.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.3.0">
-        <h2 class="vh"><span class="vn">v2.3.0</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Sign in to the editor from the view-only page using the settings gear.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.5">
-        <h2 class="vh"><span class="vn">v2.2.5</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Aircraft type shown on its own line in the sidebar.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.4">
-        <h2 class="vh"><span class="vn">v2.2.4</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Aircraft type added to sidebar entries.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.3">
-        <h2 class="vh"><span class="vn">v2.2.3</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Removed the page subtitle.</li>
-          <li>Adding a certification moved to the sidebar.</li>
-          <li>Settings moved to a gear icon at the top right.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.2">
-        <h2 class="vh"><span class="vn">v2.2.2</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Sidebar entries show the regulatory authority and certification level.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.1">
-        <h2 class="vh"><span class="vn">v2.2.1</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Changed</h3>
-        <ul>
-          <li>Sidebar entries are labelled by SIM serial number and regulatory authority.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.2.0">
-        <h2 class="vh"><span class="vn">v2.2.0</span> <span class="vd">Sep 2026</span></h2>
-        <h3 class="grp">Added</h3>
-        <ul>
-          <li>Sidebar navigation: expand a customer to see its certifications, and click one to open it.</li>
-        </ul>
-      </section>
-      <section class="ver" id="v2.1.1">
-        <h2 class="vh"><span class="vn">v2.1.1</span></h2>
-        <h3 class="grp">Notes</h3>
-        <ul>
-          <li>Starting point for this change log. Earlier versions aren&#x27;t recorded here.</li>
-        </ul>
-      </section>
   </main>
-  <div class="version-footer">v2.5.0</div>
+  <div class="version-footer">v3.1.0</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.
