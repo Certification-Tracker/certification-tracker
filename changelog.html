@@ -36,8 +36,30 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.1.0">
+        <h2 class="vh"><span class="vn">v3.1.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <p>Beta. Numbering restarts at 1.0.0 when the tracker goes live.</p>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>FAA ATD approvals: an ATD devices page for Redbird ATD QAG and LOA status, with days to expiry, a green/yellow/red status (over 365 days, 180 to 365, under 180), a resubmit-by date 180 days before expiry, and pending submissions.</li>
+          <li>Spreadsheet import in the editor: upload FAA_Approval_Tracker.xlsx and review what's new, changed or removed before saving.</li>
+          <li>Device pages show each device's LOA and QAG from the Redbird knowledge base in the main panel, with Open in knowledge base, and link to related certification projects.</li>
+          <li>Weekly knowledge base check: finds each device's QAG/LOA article, stores copies of the documents and compares the QAG version, LOA date and expiration with the spreadsheet. Differences are flagged in the editor; the spreadsheet is never changed.</li>
+          <li>When the knowledge base is behind the spreadsheet: a notice in the editor, a count on ATD devices in the sidebar, and a GitHub issue (emailed) that closes on its own once the knowledge base is updated.</li>
+          <li>ATD on the home page, a FAA ATD approvals section in the sidebar, and summary bar boxes: ATD resubmit due, ATD pending, ATD under 365 days, and (editor) KB behind spreadsheet.</li>
+          <li>Search covers ATD devices and the text of their LOAs and QAGs.</li>
+        </ul>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>The weekly check now runs both the regulatory check and the knowledge base check, and uses the current versions of GitHub's actions.</li>
+        </ul>
+        <h3 class="grp">Fixed</h3>
+        <ul>
+          <li>The Regulatory library offered Expand all while it was already expanded. It now opens collapsed, with Expand all; an authority with a regulatory update still opens so the flag is visible.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.0.0">
-        <h2 class="vh"><span class="vn">v3.0.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.0.0</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>The tracker&#x27;s data is now private. Certifications, the regulatory library and its documents live in a private repo, and the tracker asks for an access key on first visit. Keys are issued and revoked individually.</li>

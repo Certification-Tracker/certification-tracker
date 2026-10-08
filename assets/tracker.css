@@ -744,3 +744,63 @@ mark{background:var(--gold-bg);color:inherit;border-radius:3px;padding:0 2px;}
 .modal-subhead{font-size:13px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.05em;margin:18px 0 8px;padding-top:12px;border-top:1px solid var(--line);}
 .danger-link{background:none;border:none;color:var(--rust);font-size:13px;padding:0;cursor:pointer;text-decoration:underline;}
 .modal-actions{align-items:center;}
+
+/* ---- FAA ATD approvals (3.1) ---- */
+.text-link{background:none;border:none;padding:0;font:inherit;color:var(--action-ink);text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+.text-link:hover{border:none;}
+.text-link svg{width:13px;height:13px;vertical-align:-2px;margin-left:2px;}
+.pill-neutral{background:var(--neutral-bg);color:var(--ink-soft);margin-right:6px;}
+.atd-chips .pill,.atd-tr .pill,.detail-head .pill{margin-right:6px;}
+.atd-chips{display:flex;flex-wrap:wrap;gap:6px 0;margin:10px 0 4px;}
+.side-atd{display:flex;align-items:center;gap:8px;width:100%;text-align:left;}
+.side-atd svg{width:16px;height:16px;flex-shrink:0;color:var(--ink-faint);}
+.tab-count.alert{background:var(--rust);color:#fff;font-weight:700;}
+.field-grid .span-all{grid-column:1/-1;}
+.atd-table{margin-top:10px;border-top:1px solid var(--line);}
+.atd-tr{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,0.9fr) minmax(0,1fr) minmax(0,1.2fr);gap:10px;align-items:start;width:100%;padding:9px 6px;border:none;border-bottom:1px solid var(--line);border-radius:0;background:none;text-align:left;font-size:14px;color:var(--ink-soft);line-height:1.45;}
+button.atd-tr:hover{background:var(--hover);border-color:var(--line);}
+.atd-th{font-size:12px;font-weight:700;color:var(--ink-faint);padding-top:4px;padding-bottom:6px;}
+.atd-tr b{color:var(--ink);}
+.atd-sub{display:block;font-size:12px;}
+.row-sub{color:var(--ink-faint);}
+@media (max-width: 760px){
+  .atd-th{display:none;}
+  .atd-tr{grid-template-columns:1fr 1fr;gap:4px 12px;}
+  .atd-tr > span:first-child{grid-column:1/-1;}
+}
+.atd-home{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:12px 0;max-width:640px;}
+.atd-home-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:15px;}
+.atd-home-head .text-link{font-size:13px;}
+.atd-home-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;width:100%;background:none;border:none;border-top:1px solid var(--line);border-radius:0;padding:7px 0;font-size:14px;color:var(--ink);text-align:left;}
+.atd-home-row:hover{background:none;border-color:var(--line);text-decoration:underline;}
+.atd-home-what{font-size:13px;color:var(--ink-soft);}
+.atd-home-what .pill{margin-right:6px;}
+.kb-alert{border:1px solid var(--rust);background:var(--rust-bg);color:var(--rust);border-radius:8px;padding:10px 12px;margin:12px 0;max-width:760px;}
+.kb-alert-head{display:flex;align-items:center;gap:6px;font-weight:700;font-size:14px;}
+.kb-alert-head svg{width:16px;height:16px;}
+.kb-alert-sub{font-size:13px;margin:3px 0 6px;}
+.kb-alert-row{display:grid;grid-template-columns:minmax(0,0.8fr) minmax(0,2fr) auto;gap:10px;align-items:start;padding:6px 0;border-top:1px solid rgba(194,65,12,0.25);font-size:13px;}
+.kb-alert-row .text-link,.kb-alert a{color:var(--rust-strong);font-weight:700;}
+.kb-alert a svg{width:12px;height:12px;vertical-align:-1px;}
+.kb-alert-foot{font-size:12px;margin-top:6px;opacity:0.9;}
+@media (max-width: 640px){ .kb-alert-row{grid-template-columns:1fr;gap:2px;} }
+.reg-note.kb-behind{background:var(--rust-bg);color:var(--rust);}
+.atd-docs{margin-top:14px;}
+.atd-docs .tab svg{width:14px;height:14px;vertical-align:-2px;}
+.cert-atd-links{margin:12px 0 4px;}
+.cert-atd-links .text-link{margin-right:6px;}
+.atd-import-summary{font-size:14px;margin:4px 0 10px;}
+.atd-import-list{max-height:min(46vh, 420px);overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:13px;}
+.atd-import-item{padding:6px 0;border-bottom:1px solid var(--line);}
+.atd-import-item:last-child{border-bottom:none;}
+.atd-import-item b{color:var(--ink);}
+.atd-import-tag{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:0 7px;margin-right:6px;}
+.atd-import-tag.new{background:var(--sage-bg);color:var(--sage);}
+.atd-import-tag.changed{background:var(--gold-bg);color:var(--gold);}
+.atd-import-tag.removed{background:var(--rust-bg);color:var(--rust);}
+.atd-import-change{color:var(--ink-soft);margin-left:4px;}
+.atd-import-change s{color:var(--ink-faint);}
+.atd-cert-list{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;}
+.atd-cert-list label{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:3px 0;font-weight:400;}
+.kb-alert-row .text-link{justify-self:start;text-align:left;}
+.field-grid + .reg-note{margin-top:14px;}

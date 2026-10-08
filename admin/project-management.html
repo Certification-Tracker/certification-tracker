@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Project Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.0.0">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.1.0">
 </head>
 <body>
 <div class="wrap">
@@ -39,7 +39,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.0.0</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.1.0</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <div class="modal-bg" id="modal-bg">
@@ -286,6 +286,43 @@
   </div>
 </div>
 
+<div class="modal-bg" id="atd-import-bg">
+  <div class="modal">
+    <h3>Import ATD spreadsheet</h3>
+    <div class="field">
+      <label for="atd-file">FAA_Approval_Tracker.xlsx</label>
+      <input id="atd-file" type="file" accept=".xlsx,.xlsm,.xls">
+      <div class="field-hint">Reads the first sheet. You'll see what changes before anything is saved. Knowledge base links and linked certifications are kept.</div>
+    </div>
+    <div id="atd-import-preview"></div>
+    <div class="err" id="atd-import-err"></div>
+    <div class="modal-actions">
+      <button id="atd-import-cancel" type="button">Cancel</button>
+      <button class="btn-primary" id="atd-import-save" type="button" disabled>Save import</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="atd-dev-bg">
+  <div class="modal">
+    <h3 id="atd-dev-title">Edit device</h3>
+    <input type="hidden" id="atd-dev-id">
+    <div class="field">
+      <label for="atd-kb-url">Knowledge base article</label>
+      <input id="atd-kb-url" type="url" placeholder="https://support.redbirdflight.com/...">
+      <div class="field-hint">Leave blank to let the weekly check find it. Paste the device's QAG/LOA article link if it can't.</div>
+    </div>
+    <div class="field">
+      <label>Linked certification projects</label>
+      <div class="atd-cert-list" id="atd-cert-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="atd-dev-cancel" type="button">Cancel</button>
+      <button class="btn-primary" id="atd-dev-save" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="admin-modal-bg">
   <div class="modal">
     <h3>Admin</h3>
@@ -307,7 +344,8 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.0.0"></script>
+<script src="../assets/tracker.js?v=3.1.0"></script>
+<script src="../assets/atd.js?v=3.1.0"></script>
 <script>
 // Editor: everything specific to editing. Shared code is in ../assets/tracker.js.
 
@@ -529,6 +567,148 @@ async function rebuildIndex(id){
     render();
   }
 }
+
+// =====================================================================
+// FAA ATD approvals (3.1): spreadsheet import and device details
+// =====================================================================
+const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+let xlsxReady = null;
+let pendingImport = null;
+
+function loadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(!xlsxReady){
+    xlsxReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = XLSX_URL;
+      s.onload = () => resolve(window.XLSX);
+      s.onerror = () => { xlsxReady = null; reject(new Error('Could not load the spreadsheet reader. Check your connection and try again.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return xlsxReady;
+}
+
+async function persistAtd(message, successText){
+  saving = true;
+  try{
+    showBanner('info', 'Saving to GitHub&hellip;');
+    atdSha = await ghWriteFile(atdPath(), JSON.stringify(atd, null, 2) + '\n', atdSha, message);
+    broadcastSaved();
+    showBanner('success', successText || 'Saved to GitHub.');
+    setTimeout(hideBanner, 2500);
+    return true;
+  }catch(e){
+    const msg = e.message.startsWith('GitHub rejected the saved token.') ? e.message : escapeHtml(e.message);
+    showBanner('error', 'Save failed: ' + msg);
+    return false;
+  }finally{
+    saving = false;
+  }
+}
+
+function openAtdImport(){
+  pendingImport = null;
+  document.getElementById('atd-file').value = '';
+  document.getElementById('atd-import-preview').innerHTML = '';
+  document.getElementById('atd-import-err').style.display = 'none';
+  document.getElementById('atd-import-save').disabled = true;
+  document.getElementById('atd-import-bg').classList.add('open');
+}
+
+function closeAtdImport(){
+  document.getElementById('atd-import-bg').classList.remove('open');
+  pendingImport = null;
+}
+
+const showDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v) ? fmtDate(v) : (v || 'blank');
+
+async function readAtdFile(){
+  const input = document.getElementById('atd-file');
+  const err = document.getElementById('atd-import-err');
+  const preview = document.getElementById('atd-import-preview');
+  const save = document.getElementById('atd-import-save');
+  err.style.display = 'none';
+  preview.innerHTML = '';
+  save.disabled = true;
+  pendingImport = null;
+  const file = input.files && input.files[0];
+  if(!file) return;
+  try{
+    preview.innerHTML = '<div class="muted">Reading the spreadsheet&hellip;</div>';
+    const XLSX = await loadXlsx();
+    const wb = XLSX.read(await file.arrayBuffer(), {type: 'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: null});
+    const parsed = parseAtdRows(rows);
+    const diff = diffAtdImport(atd.devices, parsed.devices);
+    pendingImport = {file: file.name, ...parsed};
+    const item = (tag, d, extra) => `<div class="atd-import-item"><span class="atd-import-tag ${tag}">${tag === 'new' ? 'New' : tag === 'changed' ? 'Changed' : 'Removed'}</span><b>${escapeHtml(d.name)}</b>${extra || ''}</div>`;
+    const changes = diff.changed.map(c => item('changed', c.device, c.fields.map(([label, a, b]) =>
+      `<div class="atd-import-change">${escapeHtml(label)}: <s>${escapeHtml(showDate(a))}</s> \u2192 ${escapeHtml(showDate(b))}</div>`).join('')));
+    const any = diff.added.length + diff.changed.length + diff.removed.length;
+    preview.innerHTML = `
+      <div class="atd-import-summary">${countLabel(parsed.devices.length, 'device', 'devices')} in the sheet${parsed.asOf ? ` (as of ${fmtDate(parsed.asOf)})` : ''}: <b>${diff.added.length} new, ${diff.changed.length} changed, ${diff.removed.length} removed</b>, ${diff.unchanged} unchanged.</div>
+      ${any ? `<div class="atd-import-list">
+        ${diff.added.map(d => item('new', d, `<div class="atd-import-change">QAG ${escapeHtml(vLabel(d.version))} \u00b7 expires ${escapeHtml(d.expiration ? fmtDate(d.expiration) : (d.expirationText || 'TBA'))}</div>`)).join('')}
+        ${changes.join('')}
+        ${diff.removed.map(d => item('removed', d, '<div class="atd-import-change">Not in this spreadsheet; it will be removed from the tracker.</div>')).join('')}
+      </div>` : '<div class="muted">Nothing has changed since the last import.</div>'}`;
+    save.disabled = false;
+  }catch(e){
+    preview.innerHTML = '';
+    err.textContent = e.message;
+    err.style.display = 'block';
+  }
+}
+
+async function saveAtdImport(){
+  if(!pendingImport) return;
+  const imp = pendingImport;
+  atd = {schemaVersion: 1, source: {file: imp.file, asOf: imp.asOf, importedAt: localToday()}, devices: mergeAtdImport(atd.devices, imp.devices)};
+  closeAtdImport();
+  await persistAtd(`ATD: import ${imp.file}${imp.asOf ? ' (as of ' + imp.asOf + ')' : ''}`, `Imported ${countLabel(imp.devices.length, 'device', 'devices')}.`);
+  lastDetailHtml = null;
+  render();
+}
+
+function openAtdDeviceModal(id){
+  const d = atdDevice(id);
+  if(!d) return;
+  document.getElementById('atd-dev-title').textContent = 'Edit ' + d.name;
+  document.getElementById('atd-dev-id').value = d.id;
+  document.getElementById('atd-kb-url').value = d.kbUrl || '';
+  const chosen = new Set(d.certIds || []);
+  document.getElementById('atd-cert-list').innerHTML = sortCerts(certs).map(c =>
+    `<label><input type="checkbox" value="${c.id}" ${chosen.has(c.id) ? 'checked' : ''}><span>${escapeHtml(certName(c))} <span class="muted">\u00b7 ${escapeHtml(customerKey(c))}${c.serial ? ' \u00b7 SN ' + escapeHtml(c.serial) : ''}</span></span></label>`).join('') || '<div class="muted">No certifications yet.</div>';
+  document.getElementById('atd-dev-bg').classList.add('open');
+  document.getElementById('atd-kb-url').focus();
+}
+
+function closeAtdDeviceModal(){
+  document.getElementById('atd-dev-bg').classList.remove('open');
+}
+
+async function saveAtdDevice(){
+  const d = atdDevice(document.getElementById('atd-dev-id').value);
+  if(!d) return closeAtdDeviceModal();
+  let url = document.getElementById('atd-kb-url').value.trim();
+  if(url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+  d.kbUrl = url;
+  d.certIds = [...document.querySelectorAll('#atd-cert-list input:checked')].map(x => x.value);
+  closeAtdDeviceModal();
+  await persistAtd(`ATD: update ${d.name}`);
+  lastDetailHtml = null;
+  render();
+}
+
+document.getElementById('atd-file').addEventListener('change', readAtdFile);
+document.getElementById('atd-import-cancel').addEventListener('click', closeAtdImport);
+document.getElementById('atd-import-save').addEventListener('click', saveAtdImport);
+document.getElementById('atd-import-bg').addEventListener('click', e => { if(e.target.id === 'atd-import-bg') closeAtdImport(); });
+document.getElementById('atd-dev-cancel').addEventListener('click', closeAtdDeviceModal);
+document.getElementById('atd-dev-save').addEventListener('click', saveAtdDevice);
+document.getElementById('atd-dev-bg').addEventListener('click', e => { if(e.target.id === 'atd-dev-bg') closeAtdDeviceModal(); });
 
 // =====================================================================
 // Search tally (editor only): your searches are counted in data/library.json, to build a shared
@@ -1348,7 +1528,7 @@ const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('cert-
 
 function broadcastSaved(){
   if(!syncChannel) return;
-  try{ syncChannel.postMessage({type: 'saved', from: TAB_ID, key: syncKey(), sha: currentSha, data: certs, library}); }catch(e){}
+  try{ syncChannel.postMessage({type: 'saved', from: TAB_ID, key: syncKey(), sha: currentSha, data: certs, library, atd}); }catch(e){}
 }
 
 function updateTabNote(){
@@ -1363,6 +1543,7 @@ if(syncChannel){
       if(saving || m.key !== syncKey() || !Array.isArray(m.data)) return;
       certs = m.data;
       if(m.library) library = normalizeLibrary(m.library);
+      if(m.atd) atd = normalizeAtd(m.atd);
       currentSha = m.sha || currentSha;
       localVersion++;
       render();

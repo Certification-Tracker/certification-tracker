@@ -4,7 +4,7 @@
 // connection, then calls load(). Everything else lives here.
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.0.0';
+const VERSION = 'v3.1.0';
 const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
 
 // ---- Data and page state ----
@@ -42,6 +42,7 @@ const QUAL_STATUSES = ['Pending', 'Conditional', 'Qualified', 'Expired', 'Withdr
 // view is what the main panel shows:
 //   {type:'home'} | {type:'cert', id} | {type:'list', key} | {type:'reg', id, page} | {type:'search', q, tab}
 //   | {type:'doc', cert, doc}  (a certification's Drive document previewed in the main panel)
+//   | {type:'atd'} | {type:'atd-dev', id, doc, page}  (FAA ATD approvals, assets/atd.js)
 // It is kept in the page address, so a refresh keeps your place and any view can be bookmarked.
 const EXPANDED_KEY = 'cert-tracker-expanded';
 const EXPANDED_LIB_KEY = 'cert-tracker-expanded-library';
@@ -63,6 +64,11 @@ function parseHash(){
   try{ h = decodeURIComponent(location.hash.slice(1)); }catch(e){}
   if(!h) return {type: 'home'};
   if(h.startsWith('list/')) return {type: 'list', key: h.slice(5)};
+  if(h === 'atd') return {type: 'atd'};
+  if(h.startsWith('atd/')){
+    const m = h.slice(4).match(/^([^/]+)(?:\/(loa|qag))?(?:\/p(\d+))?$/);
+    return m ? {type: 'atd-dev', id: m[1], doc: m[2] || '', page: Number(m[3]) || 1} : {type: 'atd'};
+  }
   if(h.startsWith('search/')) return {type: 'search', q: h.slice(7), tab: 'all'};
   if(h.startsWith('doc/')){
     const parts = h.slice(4).split('/');
@@ -81,6 +87,8 @@ function viewHash(v){
   if(v.type === 'search') return 'search/' + v.q;
   if(v.type === 'doc') return 'doc/' + v.cert + '/' + v.doc;
   if(v.type === 'reg') return 'reg/' + v.id + (v.page > 1 ? '/p' + v.page : '');
+  if(v.type === 'atd') return 'atd';
+  if(v.type === 'atd-dev') return 'atd/' + v.id + (v.doc ? '/' + v.doc : '') + (v.doc && v.page > 1 ? '/p' + v.page : '');
   return '';
 }
 
@@ -159,6 +167,7 @@ function render(){
 
   if(view.type === 'cert' && !certs.some(c => c.id === view.id)) view = {type: 'home'};
   if(view.type === 'reg' && libraryLoaded && !libraryDoc(view.id)) view = {type: 'home'};
+  if(view.type === 'atd-dev' && atdLoaded && !atdDevice(view.id)) view = {type: 'atd'};
   if(view.type === 'doc' && !findCertDoc(view.cert, view.doc)) view = certs.some(c => c.id === view.cert) ? {type: 'cert', id: view.cert} : {type: 'home'};
   const activeCert = view.type === 'cert' ? certs.find(c => c.id === view.id)
     : view.type === 'doc' ? certs.find(c => c.id === view.cert) : null;
@@ -197,6 +206,8 @@ function renderMain(activeCert){
   if(view.type === 'search') return renderSearchView();
   if(view.type === 'reg') return renderRegView();
   if(view.type === 'doc' && activeCert) return renderDrivePreview(activeCert);
+  if(view.type === 'atd') return renderAtdView();
+  if(view.type === 'atd-dev') return renderAtdDevice();
   return renderHome();
 }
 
@@ -210,8 +221,9 @@ function afterRender(){
       setTimeout(() => el.classList.remove('flash'), 1600);
     }
   }
-  if(view.type === 'search') ensureRegSearch();
+  if(view.type === 'search'){ ensureRegSearch(); ensureAtdSearch(); }
   if(view.type === 'reg') attachRegPdf();
+  if(view.type === 'atd-dev') attachAtdPdf();
 }
 
 function renderHome(){
@@ -220,9 +232,10 @@ function renderHome(){
   return `
     <div class="home">
       <h2 class="home-title">Certification Tracker <span class="home-version">${VERSION}</span></h2>
-      <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}</p>
+      <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ` \u00b7 <button class="text-link" type="button" onclick="openAtd()">${countLabel(atd.devices.length, 'ATD device', 'ATD devices')}</button>` : ''}</p>
       ${renderRegUpdatesHome()}
-      <p class="home-hint">Choose a certification or a regulatory document from the sidebar, click a box above to list what it counts, or search (press <kbd>/</kbd>).</p>
+      ${renderAtdHome()}
+      <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, click a box above to list what it counts, or search (press <kbd>/</kbd>).</p>
     </div>`;
 }
 
@@ -232,10 +245,12 @@ function countLabel(n, one, many){
 
 // ---- Sidebar ----
 function renderSidebar(){
+  prepareLibraryExpansion();   // before the header, so Expand all / Collapse all matches what's open
   return `
     <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button></div>
     ${sideSectionHead('Certifications', allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : '')}
     ${renderCustomerList()}
+    ${renderAtdSidebar()}
     ${sideSectionHead('Regulatory library', `${EDITOR ? `<button class="side-tool" type="button" onclick="openLibraryModal()">+ Add</button>` : ''}${libraryAuthorities().length ? toggleAllBtn(libraryAuthorities().some(a => expandedAuthorities.has(a)), 'toggleAllAuthorities()') : ''}`)}
     ${renderLibraryList()}`;
 }
@@ -335,6 +350,7 @@ function renderCertDetail(c){
       ${field('Contact name', escapeHtml(contactName(c) || '\u2014'))}
       ${EDITOR ? field('Contact email', contactEmail(c) ? `<a href="mailto:${escapeHtml(contactEmail(c))}">${escapeHtml(contactEmail(c))}</a>` : '\u2014') : ''}
     </div>
+    ${renderCertAtdLinks(c)}
     ${renderQualification(c)}
     ${renderDocumentsSection(c)}
     ${renderDocChangeLog(c)}
@@ -588,6 +604,10 @@ const MEASURES = {
   'act-done-7':     {g: 'Activities', label: 'Completed in last 7 days', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '') >= isoAddDays(localToday(), -6))},
   'act-done-month': {g: 'Activities', label: 'Completed this month', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '').slice(0, 7) === localToday().slice(0, 7))},
   'act-late':       {g: 'Activities', label: 'Completed late', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && x.a.dateDue && x.a.dateCompleted && x.a.dateCompleted > x.a.dateDue)},
+  'atd-resubmit':   {g: 'FAA ATD', label: 'ATD resubmit due', kind: 'atd', color: 'rust', items: () => atdDevices().filter(atdResubmitDue)},
+  'atd-pending':    {g: 'FAA ATD', label: 'ATD pending', kind: 'atd', color: 'slate', items: () => atdDevices().filter(atdPending)},
+  'atd-expiring':   {g: 'FAA ATD', label: 'ATD under 365 days', kind: 'atd', color: 'gold', items: () => atdDevices().filter(d => ['yellow', 'red', 'expired'].includes(atdBand(d)))},
+  'atd-kb-behind':  {g: 'FAA ATD', label: 'KB behind spreadsheet', kind: 'atd', color: 'rust', editorOnly: true, items: () => EDITOR ? kbBehind() : []},
   'cm-7':           {g: 'Recent', label: 'Comments in last 7 days', kind: 'comment', items: () => {
     const since = isoAddDays(localToday(), -6);
     return allActivities().flatMap(x => (x.a.comments || []).filter(cm => (cm.date || '') >= since).map(cm => ({...x, cm})));
@@ -621,14 +641,14 @@ function saveSummaryBoxes(){
 
 function measureOptionsHtml(selected){
   const groups = {};
-  Object.keys(MEASURES).forEach(k => (groups[MEASURES[k].g] = groups[MEASURES[k].g] || []).push([k, MEASURES[k].label]));
+  Object.keys(MEASURES).filter(k => EDITOR || !MEASURES[k].editorOnly).forEach(k => (groups[MEASURES[k].g] = groups[MEASURES[k].g] || []).push([k, MEASURES[k].label]));
   const values = f => [...new Set(certs.map(c => (c[f] || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
   groups['By authority'] = values('authority').map(v => ['auth:' + v, 'Open \u2013 ' + v]);
   groups['By level'] = values('level').map(v => ['level:' + v, 'Open \u2013 ' + v]);
   // Keep a saved choice selectable even if no certification uses that value any more.
   const sm = summaryMeasure(selected);
   if(sm && !Object.values(groups).some(list => list.some(([k]) => k === selected))) (groups[sm.g] = groups[sm.g] || []).push([selected, sm.label]);
-  return ['Certifications', 'By authority', 'By level', 'Activities', 'Recent']
+  return ['Certifications', 'By authority', 'By level', 'Activities', 'FAA ATD', 'Recent']
     .filter(g => groups[g] && groups[g].length)
     .map(g => `<optgroup label="${g}">${groups[g].map(([k, l]) => `<option value="${escapeHtml(k)}" ${k === selected ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}</optgroup>`)
     .join('');
@@ -727,6 +747,7 @@ function sortListItems(kind, items){
   if(kind === 'cert') return list.sort((a, b) => certSortCmp(a, b) || dateCmp(certDate(a), certDate(b)));
   if(kind === 'act') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(actDate(x.a), actDate(y.a)));
   if(kind === 'comment') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(y.cm.date, x.cm.date));
+  if(kind === 'atd') return atdSorted(list);
   return list.sort((a, b) => textCmp(a.name, b.name));
 }
 
@@ -754,6 +775,7 @@ function listRowHtml(kind, item, from){
   if(kind === 'cert'){
     return rowButton({type: 'cert', id: item.id, from}, certLine(item), dueText(item.date, item.completed ? item.dateCompleted : '', isOverdue(item)));
   }
+  if(kind === 'atd') return rowButton({type: 'atd', id: item.id, from}, atdLine(item), atdRowSide(item));
   if(kind === 'customer'){
     const first = sortCerts(item.certs)[0];
     return rowButton({type: 'cert', id: first.id, from}, `<b class="row-strong">${escapeHtml(item.name)}</b>`, countLabel(item.certs.length, 'open certification', 'open certifications'));
@@ -776,6 +798,7 @@ function openRow(i){
   if(!act) return;
   if(act.type === 'cert') return navigate({type: 'cert', id: act.id}, act.from);
   if(act.type === 'reg') return navigate({type: 'reg', id: act.id, page: act.page}, act.from);
+  if(act.type === 'atd') return navigate({type: 'atd-dev', id: act.id, doc: act.doc || '', page: act.page || 1}, act.from);
   if(act.type === 'act'){
     const c = certs.find(x => x.id === act.certId);
     const a = c && (c.activityLog || []).find(x => x.id === act.activityId);
@@ -821,6 +844,7 @@ function normalizeLibrary(raw){
 }
 
 async function loadLibrary(){
+  loadAtd();
   try{
     const res = await ghReadJson(libraryPath());
     if(res){ library = normalizeLibrary(res.data); librarySha = res.sha; }
@@ -943,16 +967,21 @@ function attachRegPdf(){
   else loadRegPdf(d).then(apply);
 }
 
+// The library starts collapsed. An authority with an update opens once, so the flag can't hide
+// in a collapsed group.
+function prepareLibraryExpansion(){
+  if(!library.documents.length) return;
+  libraryExpandInit = true;
+  library.documents.forEach(d => {
+    if((regCheck(d.id) || {}).status === 'update' && !regFlagOpened.has(d.id)){ expandedAuthorities.add(d.authority || 'Other'); regFlagOpened.add(d.id); }
+  });
+}
+
 function renderLibraryList(){
   if(!library.documents.length){
     return `<div class="side-empty">${libraryLoaded ? 'No documents yet' : 'Loading\u2026'}</div>`;
   }
   const auths = libraryAuthorities();
-  if(!libraryExpandInit){ auths.forEach(a => expandedAuthorities.add(a)); libraryExpandInit = true; }
-  // An authority with an update stays open once, so the flag can't hide in a collapsed group.
-  library.documents.forEach(d => {
-    if((regCheck(d.id) || {}).status === 'update' && !regFlagOpened.has(d.id)){ expandedAuthorities.add(d.authority || 'Other'); regFlagOpened.add(d.id); }
-  });
   return auths.map(auth => {
     const open = expandedAuthorities.has(auth);
     const docs = library.documents.filter(d => (d.authority || 'Other') === auth).sort((a, b) => textCmp(a.title, b.title));
@@ -1140,12 +1169,16 @@ function renderSearchView(){
   const ready = regSearchReady();
   const regHits = ready ? searchRegs(t) : [];
   const regPages = regHits.reduce((n, r) => n + r.hits.length, 0);
-  const total = certHits.length + actHits.length + regPages;
-  if(ready && total > 0 && recordedSeq !== searchSeq){ recordedSeq = searchSeq; recordSearch(q); }
+  const atdReady = atdSearchReady();
+  const atdHits = atdReady ? searchAtd(t) : {devices: [], docs: [], count: 0};
+  const total = certHits.length + actHits.length + regPages + atdHits.count;
+  if(ready && atdReady && total > 0 && recordedSeq !== searchSeq){ recordedSeq = searchSeq; recordSearch(q); }
 
   const tab = view.tab || 'all';
   const all = tab === 'all';
   const tabs = [['all', 'All', ready ? total : null], ['certs', 'Certifications', certHits.length], ['acts', 'Activities', actHits.length], ['regs', 'Regulations', ready ? regPages : null]];
+  if(atd.devices.length) tabs.push(['atd', 'ATD devices', atdReady ? atdHits.count : null]);
+  if(!atdReady) tabs[0][2] = null;
   const groupHead = (key, label, count) => `<div class="result-group"><b>${label} <span class="title-count">(${count})</span></b>${all && count > 3 ? `<button class="side-tool" type="button" onclick="setSearchTab('${key}')">Show all</button>` : ''}</div>`;
 
   let body = '';
@@ -1177,6 +1210,7 @@ function renderSearchView(){
       }).join('');
     }
   }
+  if(all || tab === 'atd') body += renderAtdSearch(atdHits, all, from, q);
   if(!body.trim()) body = `<div class="muted list-empty">No matches${all ? '' : ' in this group'}.</div>`;
 
   return `
@@ -1364,7 +1398,10 @@ const ICON = {
   globe: svgIcon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
   search: svgIcon('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
   comment: svgIcon('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'),
-  history: svgIcon('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5M12 8v4l3 2"/>')
+  history: svgIcon('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5M12 8v4l3 2"/>'),
+  device: svgIcon('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  bell: svgIcon('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>'),
+  upload: svgIcon('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>')
 };
 
 // ---- GitHub ----
