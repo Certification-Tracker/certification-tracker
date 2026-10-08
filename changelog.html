@@ -36,8 +36,17 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.1.3">
+        <h2 class="vh"><span class="vn">v3.1.3</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>Sidebar: each SIM SN shows only its open tasks, as "n open" at the end of the line (red when one is overdue, nothing when none are open). The status dot is back in front of the SN.</li>
+          <li>Home page, Certifications and activities: every dated row shows a countdown (in n days, tomorrow, today, n days overdue) with the date under it. The "Due this week" and "Due in 30 days" tags are gone; tags now appear only for reasons the date can't show (Overdue, Expired, Expiring, Conditional, Waiting).</li>
+          <li>Stronger alert colours on the home page: Overdue is a red-outlined tag in the day scheme and solid red with white text in the dark scheme, with the overdue countdown in red; Expiring is solid amber; tomorrow, today and expiring countdowns are amber.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.1.2">
-        <h2 class="vh"><span class="vn">v3.1.2</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.1.2</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>Sidebar: each customer shows its projects as open / total under a "Projects open / total" label, gray when none are open. Each SIM SN shows its activities as open / total in front of the SN, in place of the status dot; the open number carries the status colour, red when an activity is overdue and gray when nothing is open.</li>
@@ -110,7 +119,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.1.2</div>
+  <div class="version-footer">v3.1.3</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

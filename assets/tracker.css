@@ -871,11 +871,23 @@ body.atd-drop-page #detail::after{content:'Drop the spreadsheet to import it';po
 .side-col-label{display:flex;justify-content:flex-end;padding:0 10px 4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-faint);}
 .tab-count b{font-weight:700;}
 .tab-count.zero b{font-weight:400;}
-.side-act-count{flex-shrink:0;min-width:30px;margin-top:1px;text-align:right;font-size:var(--fs-xs);color:var(--ink-faint);font-variant-numeric:tabular-nums;}
-.side-act-count b{font-weight:700;}
-.side-act-count.c-overdue b{color:var(--rust);}
-.side-act-count.c-gold b{color:var(--gold);}
-.side-act-count.c-slate b{color:var(--slate);}
-.side-act-count.c-sage b{color:var(--sage);}
-.side-act-count.c-plum b{color:var(--plum);}
-.side-act-count.c-none b{color:var(--ink-faint);font-weight:400;}
+
+/* 3.1.3: sidebar open tasks, home countdown and stronger alert colours */
+.side-sn-line{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+.side-open{flex-shrink:0;font-size:var(--fs-xs);font-weight:700;color:var(--slate);white-space:nowrap;}
+.side-open.late{color:var(--rust);}
+.home-row{grid-template-columns:96px minmax(0,1fr) auto;}
+.home-row-side .countdown{display:block;font-weight:700;color:var(--ink);}
+.home-row-side .countdown.cd-soon{color:#B25E00;}
+.home-row-side .countdown.cd-late{color:#C21F1F;}
+.pill-alert-overdue{background:var(--card);color:#C21F1F;box-shadow:inset 0 0 0 1.5px #C21F1F;font-weight:700;}
+.pill-alert-expiring{background:#FFB020;color:#3A2300;font-weight:700;}
+@media (prefers-color-scheme: dark){
+  .home-row-side .countdown.cd-soon{color:#FFB547;}
+  .home-row-side .countdown.cd-late{color:#FF7A78;}
+  .pill-alert-overdue{background:#E24B4A;color:#FFFFFF;box-shadow:none;}
+  .pill-alert-expiring{background:#EF9F27;color:#2B1A00;}
+}
+@media (max-width: 640px){ .home-row{grid-template-columns:auto minmax(0,1fr);} }
+.side-open.late{color:#C21F1F;}
+@media (prefers-color-scheme: dark){ .side-open.late{color:#FF7A78;} }

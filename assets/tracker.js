@@ -4,7 +4,7 @@
 // connection, then calls load(). Everything else lives here.
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.1.2';
+const VERSION = 'v3.1.3';
 const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
 
 // ---- Data and page state ----
@@ -284,7 +284,16 @@ function homeCard(title, headRight, body){
 function homeRow(tag, cls, text, side, action){
   rowActions.push(action);
   const tags = Array.isArray(tag) ? tag : [[tag, cls]];
-  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="home-tags">${tags.map(([t, c]) => `<span class="pill pill-${c} home-tag">${escapeHtml(t)}</span>`).join('')}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
+  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="home-tags">${tags.filter(t => t && t[0]).map(([t, c]) => `<span class="pill pill-${c} home-tag">${escapeHtml(t)}</span>`).join('')}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
+}
+
+// "in 4 days" / "tomorrow" / "today" / "2 days overdue", with the date under it (3.1.3).
+// Tomorrow, today and expiring items show in amber; overdue in red.
+function countdownHtml(iso, alert){
+  const n = daysUntil(iso);
+  const label = n < 0 ? `${countLabel(-n, 'day', 'days')} overdue` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+  const cls = n < 0 ? 'cd-late' : (n <= 1 || alert) ? 'cd-soon' : '';
+  return `<b class="countdown ${cls}">${label}</b>${fmtDate(iso).replace(/, \d{4}$/, iso.slice(0, 4) === localToday().slice(0, 4) ? '' : '$&')}`;
 }
 
 function homeClear(text){ return `<div class="home-clear">${text}</div>`; }
@@ -316,32 +325,32 @@ function renderCertsHome(){
   // One list (3.1.1): soonest date first (overdue items lead), then undated items, oldest Waiting first.
   // An item that meets several rules is one row carrying each reason.
   const items = new Map();
-  const add = (key, date, tag, cls, text, side, action) => {
-    const it = items.get(key) || {date, tags: [], text, side, action};
-    if(!it.tags.some(t => t[0] === tag)) it.tags.push([tag, cls]);
-    if(date && (!it.date || date < it.date)){ it.date = date; it.side = side; }
+  // tag: a reason the countdown can't show (Overdue, Expiring, Waiting...); null when the date says it all (3.1.3).
+  const add = (key, date, tag, cls, text, action, alert) => {
+    const it = items.get(key) || {date: '', tags: [], text, action};
+    if(tag && !it.tags.some(t => t[0] === tag)) it.tags.push([tag, cls]);
+    if(date && (!it.date || date < it.date)) it.date = date;
+    if(alert) it.alert = true;
     items.set(key, it);
   };
-  certOverdue.forEach(c => add('c' + c.id, c.date, 'Overdue', 'overdue', certText(c), 'due ' + fmtDate(c.date), certAction(c)));
-  actOverdue.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Overdue', 'overdue', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x)));
-  qualExpired.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Expired', 'overdue', certText(c), qual(c).expiryDate ? 'expired ' + fmtDate(qual(c).expiryDate) : 'qualification', certAction(c)));
-  actWeek.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Due this week', 'slate', actText(x), 'due ' + fmtDate(x.a.dateDue), actAction(x)));
-  qualExp.forEach(c => add('q' + c.id, qual(c).expiryDate, 'Expiring', 'gold', certText(c), 'expires ' + fmtDate(qual(c).expiryDate), certAction(c)));
-  certDue.forEach(c => add('c' + c.id, c.date, 'Due in 30 days', 'slate', certText(c), 'due ' + fmtDate(c.date), certAction(c)));
-  qualCond.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Conditional', 'gold', certText(c), qual(c).expiryDate ? 'expires ' + fmtDate(qual(c).expiryDate) : 'qualification', certAction(c)));
+  certOverdue.forEach(c => add('c' + c.id, c.date, 'Overdue', 'alert-overdue', certText(c), certAction(c)));
+  actOverdue.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Overdue', 'alert-overdue', actText(x), actAction(x)));
+  qualExpired.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Expired', 'alert-overdue', certText(c), certAction(c)));
+  actWeek.forEach(x => add('a' + x.a.id, x.a.dateDue, null, '', actText(x), actAction(x)));
+  qualExp.forEach(c => add('q' + c.id, qual(c).expiryDate, 'Expiring', 'alert-expiring', certText(c), certAction(c), true));
+  certDue.forEach(c => add('c' + c.id, c.date, null, '', certText(c), certAction(c)));
+  qualCond.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Conditional', 'gold', certText(c), certAction(c)));
   waiting.forEach(w => {
-    if(w.list.length > 1){
-      const due = w.list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
-      add('w' + w.list[0].c.id, due, 'Waiting', 'plum', `${who(w.list[0].c)} \u00b7 ${w.list.length} activities`, due ? 'due ' + fmtDate(due) : (w.since ? 'since ' + fmtDate(w.since) : 'no date'), actAction(w.list[0]));
-    }else{
-      const x = w.list[0];
-      add('a' + x.a.id, x.a.dateDue || '', 'Waiting', 'plum', actText(x), x.a.dateDue ? 'due ' + fmtDate(x.a.dateDue) : (w.since ? 'since ' + fmtDate(w.since) : 'no date'), actAction(x));
-      const it = items.get('a' + x.a.id); if(!it.since) it.since = w.since;
-    }
-    if(w.list.length > 1){ const it = items.get('w' + w.list[0].c.id); it.since = w.since; }
+    const multi = w.list.length > 1;
+    const due = w.list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
+    const key = multi ? 'w' + w.list[0].c.id : 'a' + w.list[0].a.id;
+    add(key, due, 'Waiting', 'plum', multi ? `${who(w.list[0].c)} \u00b7 ${w.list.length} activities` : actText(w.list[0]), actAction(w.list[0]));
+    const it = items.get(key);
+    if(!it.since) it.since = w.since;
   });
   const sorted = [...items.values()].sort((a, b) => dateCmp(a.date, b.date) || dateCmp(a.since, b.since));
-  const rows = sorted.map(it => homeRow(it.tags, null, it.text, it.side, it.action));
+  const rows = sorted.map(it => homeRow(it.tags, null, it.text,
+    it.date ? countdownHtml(it.date, it.alert) : (it.since ? 'since ' + fmtDate(it.since) : 'no date'), it.action));
   const clear = [];
   if(!certOverdue.length && !actOverdue.length) clear.push('Nothing overdue');
   if(!actWeek.length) clear.push('no activities due this week');
@@ -427,8 +436,8 @@ function renderCustomerList(){
               const isActive = x.id === activeCertId;
               return `
               <button class="side-cert ${isActive ? 'active' : ''}" ${isActive ? 'aria-current="true"' : ''} title="${escapeHtml(certName(x))}" onclick="selectCert('${x.id}')">
-                ${sideActCount(x, st)}
-                <span class="side-cert-name">SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
+                ${x.completed ? '<span class="status-dot status-spacer" aria-hidden="true"></span>' : `<span class="status-dot dot-${st.cls}" title="${st.label}"></span>`}
+                <span class="side-cert-name"><span class="side-sn-line"><span>SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}</span>${sideActCount(x)}</span>${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
               </button>`;
             }).join('')}
           ${EDITOR ? actionBtn('plus', 'Add project', `openModal(null, '${escapeAttr(customer)}')`, {cls: 'side-add', compact: false}) : ''}
@@ -437,15 +446,12 @@ function renderCustomerList(){
   }).join('');
 }
 
-// SIM SN line (3.1.2): the project's activities, open / total, in front of the SN where the status dot was.
-// The open number carries the status colour: red when an activity is overdue, gray when nothing is open.
-function sideActCount(c, st){
-  const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
-  const open = acts.filter(a => activityGroupOf(a) !== 'Complete');
-  const late = open.some(isActivityOverdue) || (!c.completed && isCertOverdue(c));
-  const cls = late ? 'overdue' : (c.completed || !open.length) ? 'none' : (st && st.cls) || 'slate';
-  const status = c.completed ? 'Completed' : st ? st.label : '';
-  return `<span class="side-act-count c-${cls}" title="Activities: ${open.length} open of ${acts.length}${late ? ', overdue' : ''}${status ? ' \u00b7 ' + status : ''}"><b>${open.length}</b>/${acts.length}</span>`;
+// SIM SN line (3.1.3): "n open" tasks at the end of the line; red when one is overdue; nothing when none are open.
+function sideActCount(c){
+  const open = (Array.isArray(c.activityLog) ? c.activityLog : []).filter(a => activityGroupOf(a) !== 'Complete');
+  if(!open.length) return '';
+  const late = open.some(isActivityOverdue);
+  return `<span class="side-open${late ? ' late' : ''}" title="${countLabel(open.length, 'open task', 'open tasks')}${late ? ', overdue' : ''}">${open.length} open</span>`;
 }
 
 function allCustomerKeys(){
