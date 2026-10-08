@@ -4,7 +4,7 @@
 // connection, then calls load(). Everything else lives here.
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.1.1';
+const VERSION = 'v3.1.2';
 const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
 
 // ---- Data and page state ----
@@ -242,9 +242,8 @@ function renderHome(){
       <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ' \u00b7 ' + countLabel(atd.devices.length, 'ATD device', 'ATD devices') : ''}</p>
       ${renderKbBehindNotice()}
       <div class="home-cards">
-        ${renderCertsHome()}
-        ${renderAtdHome()}
-        ${renderRegHome()}
+        <div class="home-col">${renderCertsHome()}</div>
+        <div class="home-col">${renderAtdHome()}${renderRegHome()}</div>
       </div>
       <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, click a box above to list what it counts, or search (press <kbd>/</kbd>).</p>
     </div>`;
@@ -380,6 +379,7 @@ function renderSidebar(){
   return `
     <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button></div>
     ${sideSectionHead('Certifications', allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : '')}
+    ${certs.length ? '<div class="side-col-label">Projects open / total</div>' : ''}
     ${renderCustomerList()}
     ${renderAtdSidebar()}
     ${sideSectionHead('Regulatory library', `${EDITOR ? `<button class="side-tool" type="button" onclick="openLibraryModal()">+ Add</button>` : ''}${libraryAuthorities().length ? toggleAllBtn(libraryAuthorities().some(a => expandedAuthorities.has(a)), 'toggleAllAuthorities()') : ''}`)}
@@ -406,9 +406,9 @@ function renderCustomerList(){
     const items = sortCerts(groups[customer]);
     const anyOverdue = items.some(isCertOverdue);
     const open = expandedCustomers.has(customer);
-    // Customer line: total projects, completed included (3.1.1).
+    // Customer line (3.1.2): open projects / total projects.
     const total = items.length;
-    const doneCount = items.filter(x => x.completed).length;
+    const openCount = items.filter(x => !x.completed).length;
     // Active certifications first (grouped by serial), completed ones last.
     const bySerial = arr => { const g = groupBySerial(arr); return g.order.flatMap(k => g.groups[k]); };
     const ordered = [...bySerial(items.filter(x => !x.completed)), ...bySerial(items.filter(x => x.completed))];
@@ -418,7 +418,7 @@ function renderCustomerList(){
           <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
           <span class="side-customer-name">${escapeHtml(customer)}</span>
           ${anyOverdue ? '<span class="tab-overdue-dot" title="Has overdue items"></span>' : ''}
-          <span class="tab-count" title="${countLabel(total, 'project', 'projects')}${doneCount ? `, ${doneCount} completed` : ''}">${total}</span>
+          <span class="tab-count${openCount ? '' : ' zero'}" title="${openCount} open of ${countLabel(total, 'project', 'projects')}"><b>${openCount}</b>/${total}</span>
         </button>
         ${open ? `
         <div class="side-certs">
@@ -427,8 +427,8 @@ function renderCustomerList(){
               const isActive = x.id === activeCertId;
               return `
               <button class="side-cert ${isActive ? 'active' : ''}" ${isActive ? 'aria-current="true"' : ''} title="${escapeHtml(certName(x))}" onclick="selectCert('${x.id}')">
-                ${x.completed ? '<span class="status-dot status-spacer" aria-hidden="true"></span>' : `<span class="status-dot dot-${st.cls}" title="${st.label}"></span>`}
-                <span class="side-cert-name"><span class="side-sn-line"><span>SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}</span>${sideActCount(x)}</span>${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
+                ${sideActCount(x, st)}
+                <span class="side-cert-name">SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
               </button>`;
             }).join('')}
           ${EDITOR ? actionBtn('plus', 'Add project', `openModal(null, '${escapeAttr(customer)}')`, {cls: 'side-add', compact: false}) : ''}
@@ -437,13 +437,15 @@ function renderCustomerList(){
   }).join('');
 }
 
-// SIM SN line (3.1.1): the project's activities, open / total; red when one is overdue.
-function sideActCount(c){
+// SIM SN line (3.1.2): the project's activities, open / total, in front of the SN where the status dot was.
+// The open number carries the status colour: red when an activity is overdue, gray when nothing is open.
+function sideActCount(c, st){
   const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
-  if(!acts.length) return '';
   const open = acts.filter(a => activityGroupOf(a) !== 'Complete');
-  const late = open.some(isActivityOverdue);
-  return `<span class="side-act-count${late ? ' late' : open.length ? '' : ' none'}" title="${open.length} open of ${countLabel(acts.length, 'activity', 'activities')}${late ? ', overdue' : ''}"><b>${open.length}</b>/${acts.length}</span>`;
+  const late = open.some(isActivityOverdue) || (!c.completed && isCertOverdue(c));
+  const cls = late ? 'overdue' : (c.completed || !open.length) ? 'none' : (st && st.cls) || 'slate';
+  const status = c.completed ? 'Completed' : st ? st.label : '';
+  return `<span class="side-act-count c-${cls}" title="Activities: ${open.length} open of ${acts.length}${late ? ', overdue' : ''}${status ? ' \u00b7 ' + status : ''}"><b>${open.length}</b>/${acts.length}</span>`;
 }
 
 function allCustomerKeys(){

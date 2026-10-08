@@ -805,6 +805,8 @@ button.atd-tr:hover{background:var(--hover);border-color:var(--line);}
 .atd-group{padding:14px 6px 6px;font-size:var(--fs-body);font-weight:700;color:var(--ink);border-bottom:1px solid var(--line-strong);}
 /* Home summary cards (3.1) */
 .home-cards{display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:12px;margin-top:14px;align-items:start;}
+.home-col{display:flex;flex-direction:column;gap:12px;min-width:0;}
+.home-col:empty{display:none;}
 .home-card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0;}
 .home-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:var(--fs-body);margin-bottom:6px;}
 .home-card-head .text-link,.home-card-note{font-size:var(--fs-sm);}
@@ -863,9 +865,17 @@ body.atd-drop-page #detail::after{content:'Drop the spreadsheet to import it';po
 .check-line{display:flex !important;align-items:flex-start;gap:8px;margin-top:8px;font-size:var(--fs-sm);color:var(--ink-soft);cursor:pointer;}
 .field .check-line input[type="checkbox"]{width:16px;height:16px;margin:2px 0 0;flex-shrink:0;}
 .home-tags{display:flex;flex-wrap:wrap;gap:4px;}
-.side-sn-line{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
-.side-act-count{flex-shrink:0;font-size:var(--fs-xs);color:var(--ink-faint);font-variant-numeric:tabular-nums;}
-.side-act-count b{color:var(--ink-soft);font-weight:700;}
-.side-act-count.late b{color:var(--rust);}
-.side-act-count.none b{color:var(--ink-faint);font-weight:400;}
 .atd-group .title-count{font-size:var(--fs-sm);}
+
+/* 3.1.2: sidebar counts */
+.side-col-label{display:flex;justify-content:flex-end;padding:0 10px 4px;font-size:var(--fs-2xs);font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-faint);}
+.tab-count b{font-weight:700;}
+.tab-count.zero b{font-weight:400;}
+.side-act-count{flex-shrink:0;min-width:30px;margin-top:1px;text-align:right;font-size:var(--fs-xs);color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+.side-act-count b{font-weight:700;}
+.side-act-count.c-overdue b{color:var(--rust);}
+.side-act-count.c-gold b{color:var(--gold);}
+.side-act-count.c-slate b{color:var(--slate);}
+.side-act-count.c-sage b{color:var(--sage);}
+.side-act-count.c-plum b{color:var(--plum);}
+.side-act-count.c-none b{color:var(--ink-faint);font-weight:400;}
