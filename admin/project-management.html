@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Project Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.1.0">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.1.0.2">
 </head>
 <body>
 <div class="wrap">
@@ -136,8 +136,8 @@
         <input id="q-eval" type="date">
       </div>
       <div class="field">
-        <label for="q-basis">Qualification basis</label>
-        <select id="q-basis"><option value="">Not set</option></select>
+        <label for="q-basis">Regulation</label>
+        <select id="q-basis"><option value="">Automatic (from authority and level)</option></select>
       </div>
     </div>
     <div class="field">
@@ -289,11 +289,13 @@
 <div class="modal-bg" id="atd-import-bg">
   <div class="modal">
     <h3>Import ATD spreadsheet</h3>
-    <div class="field">
-      <label for="atd-file">FAA_Approval_Tracker.xlsx</label>
-      <input id="atd-file" type="file" accept=".xlsx,.xlsm,.xls">
-      <div class="field-hint">Reads the first sheet. You'll see what changes before anything is saved. Knowledge base links and linked certifications are kept.</div>
-    </div>
+    <label class="atd-drop" id="atd-drop" for="atd-file">
+      <input id="atd-file" type="file" accept=".xlsx,.xlsm,.xls" class="visually-hidden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+      <span class="atd-drop-main" id="atd-drop-label">Drop FAA_Approval_Tracker.xlsx here</span>
+      <span class="atd-drop-sub">or <u>choose a file</u></span>
+    </label>
+    <div class="field-hint">Reads the first sheet. You'll see what changes before anything is saved. Knowledge base links and linked certifications are kept.</div>
     <div id="atd-import-preview"></div>
     <div class="err" id="atd-import-err"></div>
     <div class="modal-actions">
@@ -313,7 +315,8 @@
       <div class="field-hint">Leave blank to let the weekly check find it. Paste the device's QAG/LOA article link if it can't.</div>
     </div>
     <div class="field">
-      <label>Linked certification projects</label>
+      <label for="atd-cert-filter">Linked certification projects <span class="muted" id="atd-cert-count"></span></label>
+      <input id="atd-cert-filter" type="search" placeholder="Filter by customer, SN or name" autocomplete="off">
       <div class="atd-cert-list" id="atd-cert-list"></div>
     </div>
     <div class="modal-actions">
@@ -344,8 +347,8 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.1.0"></script>
-<script src="../assets/atd.js?v=3.1.0"></script>
+<script src="../assets/tracker.js?v=3.1.0.2"></script>
+<script src="../assets/atd.js?v=3.1.0.2"></script>
 <script>
 // Editor: everything specific to editing. Shared code is in ../assets/tracker.js.
 
@@ -610,6 +613,7 @@ async function persistAtd(message, successText){
 function openAtdImport(){
   pendingImport = null;
   document.getElementById('atd-file').value = '';
+  document.getElementById('atd-drop-label').textContent = 'Drop FAA_Approval_Tracker.xlsx here';
   document.getElementById('atd-import-preview').innerHTML = '';
   document.getElementById('atd-import-err').style.display = 'none';
   document.getElementById('atd-import-save').disabled = true;
@@ -623,7 +627,7 @@ function closeAtdImport(){
 
 const showDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v) ? fmtDate(v) : (v || 'blank');
 
-async function readAtdFile(){
+async function readAtdFile(dropped){
   const input = document.getElementById('atd-file');
   const err = document.getElementById('atd-import-err');
   const preview = document.getElementById('atd-import-preview');
@@ -632,8 +636,14 @@ async function readAtdFile(){
   preview.innerHTML = '';
   save.disabled = true;
   pendingImport = null;
-  const file = input.files && input.files[0];
+  const file = dropped instanceof File ? dropped : (input.files && input.files[0]);
   if(!file) return;
+  if(!/\.(xlsx|xlsm|xls)$/i.test(file.name)){
+    err.textContent = `${file.name} isn't an Excel file. Drop FAA_Approval_Tracker.xlsx.`;
+    err.style.display = 'block';
+    return;
+  }
+  document.getElementById('atd-drop-label').textContent = file.name;
   try{
     preview.innerHTML = '<div class="muted">Reading the spreadsheet&hellip;</div>';
     const XLSX = await loadXlsx();
@@ -678,11 +688,36 @@ function openAtdDeviceModal(id){
   document.getElementById('atd-dev-title').textContent = 'Edit ' + d.name;
   document.getElementById('atd-dev-id').value = d.id;
   document.getElementById('atd-kb-url').value = d.kbUrl || '';
-  const chosen = new Set(d.certIds || []);
-  document.getElementById('atd-cert-list').innerHTML = sortCerts(certs).map(c =>
-    `<label><input type="checkbox" value="${c.id}" ${chosen.has(c.id) ? 'checked' : ''}><span>${escapeHtml(certName(c))} <span class="muted">\u00b7 ${escapeHtml(customerKey(c))}${c.serial ? ' \u00b7 SN ' + escapeHtml(c.serial) : ''}</span></span></label>`).join('') || '<div class="muted">No certifications yet.</div>';
+  atdCertChosen = new Set(d.certIds || []);
+  document.getElementById('atd-cert-filter').value = '';
+  renderAtdCertList();
   document.getElementById('atd-dev-bg').classList.add('open');
   document.getElementById('atd-kb-url').focus();
+}
+
+// Linked certification projects: linked ones first, then grouped by customer; the filter narrows the list.
+let atdCertChosen = new Set();
+
+function renderAtdCertList(){
+  const t = document.getElementById('atd-cert-filter').value.trim().toLowerCase();
+  const match = c => !t || [customerKey(c), c.serial, certName(c)].some(v => String(v || '').toLowerCase().includes(t));
+  const item = c => `
+    <label class="atd-cert-item ${atdCertChosen.has(c.id) ? 'on' : ''}">
+      <input type="checkbox" value="${c.id}" ${atdCertChosen.has(c.id) ? 'checked' : ''} onchange="toggleAtdCert(this)">
+      <span><b>${escapeHtml(certName(c))}</b><span class="atd-cert-sub">${escapeHtml(customerKey(c))}${c.serial ? ' \u00b7 SN ' + escapeHtml(c.serial) : ''}${c.completed ? ' \u00b7 Completed' : ''}</span></span>
+    </label>`;
+  const linked = sortCerts(certs.filter(c => atdCertChosen.has(c.id) && match(c)));
+  const groups = {};
+  sortCerts(certs.filter(c => !atdCertChosen.has(c.id) && match(c))).forEach(c => (groups[customerKey(c)] = groups[customerKey(c)] || []).push(c));
+  const html = (linked.length ? `<div class="atd-cert-group">Linked</div>${linked.map(item).join('')}` : '')
+    + Object.keys(groups).sort(textCmp).map(g => `<div class="atd-cert-group">${escapeHtml(g)}</div>${groups[g].map(item).join('')}`).join('');
+  document.getElementById('atd-cert-list').innerHTML = html || `<div class="muted atd-cert-empty">${certs.length ? 'No certifications match.' : 'No certifications yet.'}</div>`;
+  document.getElementById('atd-cert-count').textContent = atdCertChosen.size ? `\u00b7 ${atdCertChosen.size} linked` : '';
+}
+
+function toggleAtdCert(box){
+  if(box.checked) atdCertChosen.add(box.value); else atdCertChosen.delete(box.value);
+  renderAtdCertList();
 }
 
 function closeAtdDeviceModal(){
@@ -695,14 +730,44 @@ async function saveAtdDevice(){
   let url = document.getElementById('atd-kb-url').value.trim();
   if(url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
   d.kbUrl = url;
-  d.certIds = [...document.querySelectorAll('#atd-cert-list input:checked')].map(x => x.value);
+  d.certIds = [...atdCertChosen].filter(id => certs.some(c => c.id === id));
   closeAtdDeviceModal();
   await persistAtd(`ATD: update ${d.name}`);
   lastDetailHtml = null;
   render();
 }
 
-document.getElementById('atd-file').addEventListener('change', readAtdFile);
+document.getElementById('atd-file').addEventListener('change', () => readAtdFile());
+document.getElementById('atd-cert-filter').addEventListener('input', renderAtdCertList);
+
+// Drag and drop: onto the import window's drop area, or anywhere on the ATD devices page.
+const isFileDrag = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+const atdDropArea = document.getElementById('atd-drop');
+['dragenter', 'dragover'].forEach(ev => atdDropArea.addEventListener(ev, e => { if(isFileDrag(e)){ e.preventDefault(); atdDropArea.classList.add('over'); } }));
+['dragleave', 'drop'].forEach(ev => atdDropArea.addEventListener(ev, () => atdDropArea.classList.remove('over')));
+atdDropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) readAtdFile(f);
+});
+const onAtdPage = () => view.type === 'atd' && !document.querySelector('.modal-bg.open');
+document.addEventListener('dragover', e => {
+  if(!isFileDrag(e)) return;
+  e.preventDefault();   // stops the browser opening the file instead
+  document.body.classList.toggle('atd-drop-page', onAtdPage());
+});
+document.addEventListener('dragleave', e => { if(!e.relatedTarget) document.body.classList.remove('atd-drop-page'); });
+document.addEventListener('drop', e => {
+  if(!isFileDrag(e)) return;
+  e.preventDefault();
+  document.body.classList.remove('atd-drop-page');
+  if(!onAtdPage()) return;
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(!f) return;
+  openAtdImport();
+  readAtdFile(f);
+});
 document.getElementById('atd-import-cancel').addEventListener('click', closeAtdImport);
 document.getElementById('atd-import-save').addEventListener('click', saveAtdImport);
 document.getElementById('atd-import-bg').addEventListener('click', e => { if(e.target.id === 'atd-import-bg') closeAtdImport(); });
@@ -889,7 +954,19 @@ async function load(){
     certs = [];
   }
   render();
-  loadLibrary();
+  loadLibrary().then(lockCompletedRegulations);
+}
+
+// 3.1: completed certifications from before regulations were linked get their issue recorded once.
+async function lockCompletedRegulations(){
+  const todo = certs.filter(c => c.completed && !qual(c).basisRevision && !qual(c).basisDocId && certRegulation(c));
+  if(!todo.length || saving) return;
+  todo.forEach(lockRegulation);
+  saving = true;
+  try{ await writeToGitHub(certs, 'Record the regulation issue for completed certifications'); broadcastSaved(); }
+  catch(e){ /* tried again next time the editor opens */ }
+  finally{ saving = false; }
+  render();
 }
 
 let logIdCounter = 0;
@@ -1261,7 +1338,7 @@ function fillQualification(q){
   q = q || {};
   document.getElementById('q-status').innerHTML = '<option value="">Not set</option>'
     + QUAL_STATUSES.map(s => `<option>${s}</option>`).join('');
-  document.getElementById('q-basis').innerHTML = '<option value="">Not set</option>'
+  document.getElementById('q-basis').innerHTML = '<option value="">Automatic (from authority and level)</option>'
     + library.documents.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(docTitle(d))}${d.revision ? ' \u2013 ' + escapeHtml(d.revision) : ''}</option>`).join('');
   document.getElementById('q-status').value = q.status || '';
   document.getElementById('q-number').value = q.certificateNumber || '';
@@ -1361,6 +1438,12 @@ async function saveCert(){
     if(idx > -1){
       const prev = certs[idx];
       certs[idx] = {...prev, ...data};
+      // A completed certification keeps the issue it was qualified under, unless its regulation was changed.
+      if(prev.completed){
+        const pq = qual(prev), nq = certs[idx].qualification;
+        if((pq.basis || '') === (nq.basis || '') && (pq.basisRevision || pq.basisDocId)){ nq.basisRevision = pq.basisRevision; nq.basisDocId = pq.basisDocId; }
+        else lockRegulation(certs[idx]);
+      }
       delete certs[idx].primaryContact;
       if(!Array.isArray(certs[idx].activityLog)) certs[idx].activityLog = [];
       if(!Array.isArray(certs[idx].docChangeLog)) certs[idx].docChangeLog = [];
@@ -1383,6 +1466,7 @@ async function completeCert(id){
   if(!c) return;
   c.completed = true;
   c.dateCompleted = localToday();
+  lockRegulation(c);
   await persist();
   render();
 }
@@ -1392,6 +1476,7 @@ async function reopenCert(id){
   if(!c) return;
   c.completed = false;
   delete c.dateCompleted;
+  unlockRegulation(c);
   await persist();
   render();
 }

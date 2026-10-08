@@ -832,3 +832,30 @@ button.atd-tr:hover{background:var(--hover);border-color:var(--line);}
 .v2log .grp{font-size:12px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.05em;margin:12px 0 4px;}
 .v2log ul{margin:0;padding-left:20px;font-size:14px;color:var(--ink-soft);}
 .v2log li{margin:3px 0;}
+/* 3.1 fixes: ATD import drop area, linked certifications list, document history, regulation */
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.atd-drop{display:flex;flex-direction:column;align-items:center;gap:4px;border:2px dashed var(--line-strong);border-radius:10px;padding:22px 12px;margin:4px 0 6px;text-align:center;cursor:pointer;color:var(--ink-soft);font-weight:400;}
+.atd-drop:hover,.atd-drop.over{border-color:var(--action-ink);background:var(--hover);}
+.atd-drop:focus-within{outline:2px solid var(--action-ink);outline-offset:2px;}
+.atd-drop svg{width:22px;height:22px;color:var(--ink-faint);}
+.atd-drop-main{font-size:14px;color:var(--ink);}
+.atd-drop-sub{font-size:13px;color:var(--action-ink);}
+body.atd-drop-page #detail{outline:3px dashed var(--action-ink);outline-offset:-6px;}
+body.atd-drop-page #detail::after{content:'Drop the spreadsheet to import it';position:sticky;bottom:12px;display:block;width:fit-content;margin:12px auto 0;padding:6px 14px;border-radius:99px;background:var(--action-ink);color:#fff;font-size:14px;}
+#atd-cert-filter{margin-bottom:6px;}
+.atd-cert-list{max-height:min(46vh, 340px);overflow:auto;border:1px solid var(--line);border-radius:8px;padding:0;}
+.atd-cert-group{position:sticky;top:0;z-index:1;background:var(--card);padding:7px 10px 3px;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--ink-faint);border-top:1px solid var(--line);}
+.atd-cert-group:first-child{border-top:none;}
+.atd-cert-list .atd-cert-item{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;padding:7px 10px;margin:0;font-size:14px;font-weight:400;text-align:left;cursor:pointer;border-top:1px solid var(--line);}
+.atd-cert-list .atd-cert-item:hover{background:var(--hover);}
+.atd-cert-list .atd-cert-item.on{background:var(--slate-bg);}
+.atd-cert-list .atd-cert-item input[type="checkbox"]{width:16px;height:16px;margin:2px 0 0;padding:0;justify-self:start;}
+.atd-cert-item b{font-weight:600;color:var(--ink);}
+.atd-cert-sub{display:block;font-size:12px;color:var(--ink-faint);}
+.atd-cert-empty{padding:10px;font-size:14px;}
+.doc-history{margin-top:8px;}
+.doc-history-body{margin-top:4px;padding-left:18px;}
+.doc-history-add{margin:2px 0 4px;}
+.reg-used-by{font-size:13px;color:var(--ink-soft);margin:-4px 0 12px;}
+.reg-used-by .fk{display:inline;margin-right:6px;}
+.reg-note-inline{font-size:13px;}

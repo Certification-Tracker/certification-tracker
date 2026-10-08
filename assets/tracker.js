@@ -238,7 +238,7 @@ function renderHome(){
   return `
     <div class="home">
       <h2 class="home-title">Certification Tracker <span class="home-version">${VERSION}</span></h2>
-      <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ` \u00b7 <button class="text-link" type="button" onclick="openAtd()">${countLabel(atd.devices.length, 'ATD device', 'ATD devices')}</button>` : ''}</p>
+      <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ' \u00b7 ' + countLabel(atd.devices.length, 'ATD device', 'ATD devices') : ''}</p>
       ${renderKbBehindNotice()}
       <div class="home-cards">
         ${renderCertsHome()}
@@ -340,7 +340,7 @@ function renderRegHome(){
   const failed = EDITOR ? library.documents.filter(d => (regCheck(d.id) || {}).status === 'error') : [];
   const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
   const rows = [
-    ...ups.map(d => homeRow('Update', 'gold', escapeHtml(docTitle(d)), `${escapeHtml(regCheck(d.id).latest || 'newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}`, {type: 'reg', id: d.id, page: 1})),
+    ...ups.map(d => { const n = certsUsingDoc(d.id, true).length; return homeRow('Update', 'gold', `${escapeHtml(docTitle(d))}${n ? ` <span class="row-sub">\u00b7 ${countLabel(n, 'open certification', 'open certifications')}</span>` : ''}`, `${escapeHtml(regCheck(d.id).latest || 'newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}`, {type: 'reg', id: d.id, page: 1}); }),
     ...failed.map(d => homeRow('Check failed', 'neutral', escapeHtml(docTitle(d)), 'will retry next week', {type: 'reg', id: d.id, page: 1}))
   ];
   return homeCard('Regulatory library', `<span class="home-card-note">${countLabel(library.documents.length, 'document', 'documents')}</span>`,
@@ -454,6 +454,7 @@ function renderCertDetail(c){
       ${field('SIM model', escapeHtml(certModel(c) || '\u2014'))}
       ${field('Aircraft type', escapeHtml(c.aircraft || '\u2014'))}
       ${field('Certification level', escapeHtml(c.level || '\u2014'))}
+      ${field('Regulation', regulationHtml(c))}
       <div><div class="fk">Due date</div><div class="fv ${over ? 'due-cell overdue' : ''}">${fmtDate(c.date)}${over ? ' <span class="pill pill-overdue">Overdue</span>' : ''}</div></div>
       ${field('Contact name', escapeHtml(contactName(c) || '\u2014'))}
       ${EDITOR ? field('Contact email', contactEmail(c) ? `<a href="mailto:${escapeHtml(contactEmail(c))}">${escapeHtml(contactEmail(c))}</a>` : '\u2014') : ''}
@@ -461,14 +462,13 @@ function renderCertDetail(c){
     ${renderCertAtdLinks(c)}
     ${renderQualification(c)}
     ${renderDocumentsSection(c)}
-    ${renderDocChangeLog(c)}
     ${renderActivityLog(c)}`;
 }
 
 // ---- Qualification (3.0): what the authority granted, and when it lapses ----
 function qual(c){ return c.qualification && typeof c.qualification === 'object' ? c.qualification : {}; }
 
-function hasQualification(c){ return Object.values(qual(c)).some(v => String(v || '').trim()); }
+function hasQualification(c){ return Object.entries(qual(c)).some(([k, v]) => !['basis', 'basisRevision', 'basisDocId'].includes(k) && String(v || '').trim()); }
 
 function daysUntil(iso){
   if(!iso) return null;
@@ -489,13 +489,67 @@ function dueNote(iso){
   return '';
 }
 
+// ---- Regulation (3.1): the library document a certification is qualified against ----
+// Set automatically from the authority and level; Edit can pick another (qualification.basis). A completed
+// certification keeps the issue it was qualified under (qualification.basisRevision).
+// Hungary (CAA-HU) and Greece (HCAA) work to EASA's CS-FSTD(A).
+const REG_RULES = [
+  {auth: /^(EASA|CAA-HU|HCAA)$/i, docAuth: 'EASA', title: /CS-FSTD/i},
+  {auth: /^UK CAA$/i, docAuth: 'UK CAA', title: /CS-FSTD/i},
+  {auth: /^FAA$/i, level: /ATD/i, docAuth: 'FAA', title: /61-136/},
+  {auth: /^FAA$/i, docAuth: 'FAA', title: /Part 60/i},
+  {auth: /^Transport Canada$/i, docAuth: 'Transport Canada', title: /9685/}
+];
+
+function autoRegulation(c){
+  const auth = (c.authority || '').trim(), level = (c.level || '').trim();
+  const rule = REG_RULES.find(r => r.auth.test(auth) && (!r.level || r.level.test(level)));
+  if(!rule) return null;
+  return library.documents.find(d => (d.authority || '') === rule.docAuth && rule.title.test(d.title || '')) || null;
+}
+
+// {doc, auto, revision, locked} or null
+function certRegulation(c){
+  const q = qual(c);
+  const locked = !!(c.completed && (q.basisRevision || q.basisDocId));
+  const chosen = q.basis ? libraryDoc(q.basis) : null;
+  const doc = (locked && q.basisDocId && libraryDoc(q.basisDocId)) || chosen || autoRegulation(c);
+  if(!doc) return null;
+  return {doc, auto: !chosen, locked, revision: locked ? q.basisRevision : (doc.revision || '')};
+}
+
+function regulationHtml(c){
+  const r = certRegulation(c);
+  if(!r) return EDITOR && libraryLoaded && (c.authority || '').trim() ? '<span class="muted">No matching document in the library</span>' : '\u2014';
+  const outdated = r.locked && r.doc.revision && r.revision !== r.doc.revision;
+  return `<button class="link-inline" type="button" onclick="openDoc('${r.doc.id}')">${escapeHtml(docTitle(r.doc))}${r.revision ? ' ' + escapeHtml(r.revision) : ''}</button>`
+    + (c.completed ? (outdated ? ` <span class="muted reg-note-inline">(qualified under ${escapeHtml(r.revision)}; library has ${escapeHtml(r.doc.revision)})</span>` : '') : regBadge(r.doc.id))
+    + (EDITOR && r.auto ? ' <span class="mode-tag">Automatic</span>' : '');
+}
+
+// Records the regulation and issue in force when a certification is completed (editor saves it).
+function lockRegulation(c){
+  const q = {...qual(c)};
+  delete q.basisRevision; delete q.basisDocId;
+  c.qualification = q;
+  const r = certRegulation(c);
+  if(r) c.qualification = {...q, basisDocId: r.doc.id, basisRevision: r.doc.revision || ''};
+}
+
+function unlockRegulation(c){
+  if(!c.qualification) return;
+  delete c.qualification.basisRevision;
+  delete c.qualification.basisDocId;
+}
+
+// Open certifications that use a library document (for update flags).
+function certsUsingDoc(id, openOnly){
+  return certs.filter(c => (!openOnly || !c.completed) && (certRegulation(c) || {}).doc && certRegulation(c).doc.id === id);
+}
+
 function renderQualification(c){
   const q = qual(c);
   if(!hasQualification(c) && !EDITOR) return '';
-  const basisDoc = q.basis ? libraryDoc(q.basis) : null;
-  const basis = basisDoc
-    ? `<button class="link-inline" type="button" onclick="openDoc('${basisDoc.id}')">${escapeHtml(docTitle(basisDoc))}${basisDoc.revision ? ' ' + escapeHtml(basisDoc.revision) : ''}</button>${regBadge(basisDoc.id)}`
-    : escapeHtml(q.basis || '\u2014');
   const field = (label, value) => `<div><div class="fk">${label}</div><div class="fv">${value}</div></div>`;
   return `
     <div class="changelog qual-section">
@@ -506,7 +560,6 @@ function renderQualification(c){
         ${field('Issued', fmtDate(q.issueDate))}
         ${field('Expires', fmtDate(q.expiryDate) + dueNote(q.expiryDate))}
         ${field('Next evaluation', fmtDate(q.nextEvaluation) + dueNote(q.nextEvaluation))}
-        ${field('Qualification basis', basis)}
       </div>
       ${q.conditions ? `<div class="field-grid qual-conditions"><div class="span-all">${''}<div class="fk">Conditions</div><div class="fv">${escapeHtml(q.conditions).replace(/\n/g, '<br>')}</div></div></div>` : ''}`
       : `<div class="muted qual-empty">No qualification details yet. Use Edit to add the status, certificate number and dates once the authority issues them.</div>`}
@@ -537,15 +590,28 @@ function renderDocumentsSection(c){
         </div>`;
       }).join('') : '<div class="changelog-entry"><span class="changelog-text muted">No documents yet</span></div>'}
       ${c.docLocation ? `<div style="margin-top:6px;">${renderDocLocation(c.docLocation)}</div>` : ''}
+      ${renderDocHistory(c)}
     </div>`;
 }
 
-function renderDocChangeLog(c){
+// Document history (3.1): recorded automatically when documents change; shown collapsed under Documents.
+const openDocHistory = new Set();
+
+function toggleDocHistory(id){
+  if(openDocHistory.has(id)) openDocHistory.delete(id); else openDocHistory.add(id);
+  render();
+}
+
+function renderDocHistory(c){
   const entries = Array.isArray(c.docChangeLog) ? c.docChangeLog : [];
+  if(!entries.length && !EDITOR) return '';
+  const open = openDocHistory.has(c.id);
   const sorted = [...entries].sort((a,b) => (b.date||'').localeCompare(a.date||'') || (b.ts || 0) - (a.ts || 0));
   return `
-    <div class="changelog">
-      ${sectionHead('Document Change Log', `openChangeLogModal('${c.id}')`)}
+    <div class="doc-history">
+      <button class="comments-toggle" type="button" aria-expanded="${open}" onclick="toggleDocHistory('${c.id}')">${ICON.chevron}<span>History (${entries.length})</span></button>
+      ${open ? `<div class="doc-history-body">
+      ${EDITOR ? `<button class="side-tool doc-history-add" type="button" onclick="openChangeLogModal('${c.id}')">+ Add entry</button>` : ''}
       ${sorted.length ? sorted.map(entry => `
         <div class="changelog-entry ${EDITOR ? 'changelog-editable' : ''}">
           <div class="changelog-main">
@@ -557,6 +623,7 @@ function renderDocChangeLog(c){
             ${actionBtn('trash', 'Delete', `deleteChangeLogEntry('${c.id}', '${entry.id}')`, {cls: 'danger'})}
           </div>` : ''}
         </div>`).join('') : '<div class="changelog-entry"><span class="changelog-text muted">No entries yet</span></div>'}
+      </div>` : ''}
     </div>`;
 }
 
@@ -1019,6 +1086,14 @@ function regStatusNote(d){
   return '';
 }
 
+function renderRegUsedBy(d){
+  const list = sortCerts(certsUsingDoc(d.id, false));
+  if(!list.length) return '';
+  const open = list.filter(c => !c.completed), done = list.filter(c => c.completed);
+  const link = c => `<button class="link-inline" type="button" onclick="selectCert('${c.id}')">${escapeHtml(customerKey(c))} (${escapeHtml([c.serial, c.aircraft].filter(Boolean).join(', ') || certName(c))})</button>`;
+  return `<div class="reg-used-by"><span class="fk">Used by</span> ${open.map(link).join(', ') || '<span class="muted">no open certifications</span>'}${done.length ? ` <span class="muted">\u00b7 ${countLabel(done.length, 'completed certification', 'completed certifications')}</span>` : ''}</div>`;
+}
+
 function libraryAuthorities(){
   return [...new Set(library.documents.map(d => d.authority || 'Other'))].sort(textCmp);
 }
@@ -1154,6 +1229,7 @@ function renderRegView(){
         ${actionBtn('trash', 'Delete', `deleteLibraryDoc('${d.id}')`, {cls: 'danger'})}` : ''}
     </div>
     ${regStatusNote(d)}
+    ${renderRegUsedBy(d)}
     ${EDITOR && !d.indexed ? `<div class="doc-note">This document isn't in the search index yet. Once its PDF is in the data repo's regs/ folder, click Rebuild search index.</div>` : ''}
     ${url ? '' : `<div class="reg-loading" id="reg-loading">Loading the document&hellip;</div>`}
     ${isPhone()
