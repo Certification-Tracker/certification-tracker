@@ -187,7 +187,6 @@ function render(){
       <div class="layout">
         <div class="side-col">
           <nav class="sidebar" id="sidebar" aria-label="Tracker navigation"></nav>
-          ${EDITOR ? `<button class="btn-text side-add-customer" onclick="openModal(null, '', 'customer')">${ICON.plus}<span>Add customer</span></button>` : ''}
         </div>
         <section class="detail" id="detail" aria-live="polite"></section>
       </div>`;
@@ -415,7 +414,7 @@ function renderSidebar(){
   prepareLibraryExpansion();   // before the header, so Expand all / Collapse all matches what's open
   return `
     <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button><button class="side-collapse" type="button" onclick="setSidebarCollapsed(true)" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">${ICON.chevronsLeft}</button></div>
-    ${sideSectionHead('Certifications', allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : '')}
+    ${sideSectionHead('Certifications', `${EDITOR ? `<button class="side-tool" type="button" onclick="openModal(null, '', 'customer')">+ Add</button>` : ''}${allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : ''}`)}
     ${certs.length ? '<div class="side-col-label">Projects open / total</div>' : ''}
     ${renderCustomerList()}
     ${renderAtdSidebar()}
