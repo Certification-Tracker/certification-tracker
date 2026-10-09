@@ -4,7 +4,7 @@
 // connection, then calls load(). Everything else lives here.
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.1.3';
+const VERSION = 'v3.1.4';
 const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
 
 // ---- Data and page state ----
@@ -163,7 +163,6 @@ let lastDetailHtml = null;
 
 function render(){
   regMemo = new Map();
-  renderSummary();
   syncSearchInput();
   const list = document.getElementById('list');
   if(!list || (EDITOR && !ghConfig)) return;
@@ -194,6 +193,7 @@ function render(){
       </div>`;
     lastDetailHtml = null;
   }
+  document.querySelector('.layout').classList.toggle('side-collapsed', sidebarIsCollapsed());
   document.getElementById('sidebar').innerHTML = renderSidebar();
 
   const html = renderMain(activeCert);
@@ -245,7 +245,7 @@ function renderHome(){
         <div class="home-col">${renderCertsHome()}</div>
         <div class="home-col">${renderAtdHome()}${renderRegHome()}</div>
       </div>
-      <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, click a box above to list what it counts, or search (press <kbd>/</kbd>).</p>
+      <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, or search (press <kbd>/</kbd>).</p>
     </div>`;
 }
 
@@ -344,7 +344,7 @@ function renderCertsHome(){
     const multi = w.list.length > 1;
     const due = w.list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
     const key = multi ? 'w' + w.list[0].c.id : 'a' + w.list[0].a.id;
-    add(key, due, 'Waiting', 'plum', multi ? `${who(w.list[0].c)} \u00b7 ${w.list.length} activities` : actText(w.list[0]), actAction(w.list[0]));
+    add(key, due, 'Waiting', 'plum', multi ? `${who(w.list[0].c)} \u00b7 ${w.list.length} tasks` : actText(w.list[0]), actAction(w.list[0]));
     const it = items.get(key);
     if(!it.since) it.since = w.since;
   });
@@ -353,7 +353,7 @@ function renderCertsHome(){
     it.date ? countdownHtml(it.date, it.alert) : (it.since ? 'since ' + fmtDate(it.since) : 'no date'), it.action));
   const clear = [];
   if(!certOverdue.length && !actOverdue.length) clear.push('Nothing overdue');
-  if(!actWeek.length) clear.push('no activities due this week');
+  if(!actWeek.length) clear.push('no tasks due this week');
   if(!certDue.length) clear.push('no certifications due in 30 days');
   if(!qualExp.length && !qualExpired.length) clear.push('no qualifications expiring in 90 days');
   if(clear.length) clear[0] = clear[0][0].toUpperCase() + clear[0].slice(1);
@@ -361,7 +361,7 @@ function renderCertsHome(){
     ['qual-exp90', qualExp.length], ['qual-cond', qualCond.length], ['act-wait', waiting.reduce((n, w) => n + w.list.length, 0)]].filter(([, n]) => n);
   const more = rows.length > HOME_ROWS_MAX
     ? `<div class="home-more">Show all: ${lists.map(([k, n]) => `<button class="text-link" type="button" onclick="navigate({type: 'list', key: '${k}'})">${escapeHtml(summaryMeasure(k).label)} (${n})</button>`).join(' \u00b7 ')}</div>` : '';
-  return homeCard('Certifications and activities', `<button class="text-link" type="button" onclick="navigate({type: 'list', key: 'act-open'})">${countLabel(acts.length, 'open activity', 'open activities')}</button>`,
+  return homeCard('Certifications and Tasks', `<button class="text-link" type="button" onclick="navigate({type: 'list', key: 'act-open'})">${countLabel(acts.length, 'open task', 'open tasks')}</button>`,
     rows.slice(0, HOME_ROWS_MAX).join('') + more + (clear.length ? homeClear(clear.join(' \u00b7 ')) : ''));
 }
 
@@ -383,10 +383,38 @@ function countLabel(n, one, many){
 }
 
 // ---- Sidebar ----
+// ---- Collapsible sidebar (3.1.4): a 40px icon strip; the choice is kept per browser. Phones always show it in full. ----
+const SIDEBAR_KEY = 'cert-tracker-sidebar-collapsed';
+let sidebarCollapsed = false;
+try{ sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1'; }catch(e){}
+
+function sidebarIsCollapsed(){ return sidebarCollapsed && !isPhone(); }
+
+function setSidebarCollapsed(on){
+  sidebarCollapsed = !!on;
+  try{ localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0'); }catch(e){}
+  render();
+}
+
+function renderSidebarStrip(){
+  const openTasks = allActivities().filter(x => activityGroupOf(x.a) !== 'Complete').length;
+  const lateTasks = allActivities().some(x => isActivityOverdue(x.a));
+  const icon = (label, svg, onclick, active, badge) =>
+    `<button class="strip-btn ${active ? 'active' : ''}" type="button" onclick="${onclick}" title="${label}" aria-label="${label}">${svg}${badge || ''}</button>`;
+  return `
+    <button class="strip-btn strip-toggle" type="button" onclick="setSidebarCollapsed(false)" title="Expand sidebar" aria-label="Expand sidebar" aria-expanded="false">${ICON.chevronsRight}</button>
+    ${icon('Home', ICON.home, 'goHome()', view.type === 'home')}
+    ${icon(`Certifications \u00b7 ${countLabel(openTasks, 'open task', 'open tasks')}`, ICON.cert, 'setSidebarCollapsed(false)', view.type === 'cert' || view.type === 'doc',
+      openTasks ? `<span class="strip-badge${lateTasks ? ' late' : ''}">${openTasks}</span>` : '')}
+    ${atdLoaded && atd.devices.length ? icon('FAA ATD approvals', ICON.device, 'openAtd()', view.type === 'atd' || view.type === 'atd-dev') : ''}
+    ${library.documents.length ? icon('Regulatory library', ICON.books, 'setSidebarCollapsed(false)', view.type === 'reg') : ''}`;
+}
+
 function renderSidebar(){
+  if(sidebarIsCollapsed()) return renderSidebarStrip();
   prepareLibraryExpansion();   // before the header, so Expand all / Collapse all matches what's open
   return `
-    <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button></div>
+    <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button><button class="side-collapse" type="button" onclick="setSidebarCollapsed(true)" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">${ICON.chevronsLeft}</button></div>
     ${sideSectionHead('Certifications', allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : '')}
     ${certs.length ? '<div class="side-col-label">Projects open / total</div>' : ''}
     ${renderCustomerList()}
@@ -711,7 +739,7 @@ function renderActivityLog(c){
   return `
     <div class="changelog">
       <div class="fk act-head">
-        <span>Activities</span>
+        <span>Tasks</span>
         <div class="act-head-tools">
           ${activityToggleAllBtn(c)}
           ${EDITOR ? actionBtn('plus', 'Add', `openActivityModal('${c.id}')`, {compact: false}) : ''}
@@ -767,13 +795,6 @@ function toggleComments(activityId){
 // =====================================================================
 // Summary bar: each person picks the boxes shown (saved in this browser)
 // =====================================================================
-const SUMMARY_KEY = 'cert-tracker-summary';
-const SUMMARY_DEFAULT = ['certs-all', 'certs-overdue', 'certs-due30', 'certs-nodue', 'certs-done'];
-const SUMMARY_MAX = 8;
-let summaryBoxes = null;   // loaded on first use (see renderSummary)
-let summaryEditing = false;
-let summaryDragFrom = null;
-
 function isoAddDays(iso, n){
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n);
@@ -802,7 +823,7 @@ const MEASURES = {
   'certs-done':     {g: 'Certifications', label: 'Completed', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed)},
   'certs-done-year':{g: 'Certifications', label: 'Completed this year', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed && (c.dateCompleted || '').slice(0, 4) === localToday().slice(0, 4))},
   'certs-done-30':  {g: 'Certifications', label: 'Completed in last 30 days', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed && (c.dateCompleted || '') >= isoAddDays(localToday(), -29))},
-  'certs-noact':    {g: 'Certifications', label: 'No activity logged', kind: 'cert', items: () => certs.filter(c => !c.completed && !(c.activityLog || []).length)},
+  'certs-noact':    {g: 'Certifications', label: 'No tasks logged', kind: 'cert', items: () => certs.filter(c => !c.completed && !(c.activityLog || []).length)},
   'qual-exp90':     {g: 'Qualifications', label: 'Expiring in 90 days', kind: 'cert', color: 'rust', items: () => certs.filter(c => dateWithin(qual(c).expiryDate, 90))},
   'qual-exp180':    {g: 'Qualifications', label: 'Expiring in 180 days', kind: 'cert', items: () => certs.filter(c => dateWithin(qual(c).expiryDate, 180))},
   'qual-expired':   {g: 'Qualifications', label: 'Expired', kind: 'cert', color: 'rust', items: () => certs.filter(c => { const n = daysUntil(qual(c).expiryDate); return (n !== null && n < 0) || qual(c).status === 'Expired'; })},
@@ -814,22 +835,22 @@ const MEASURES = {
     certs.filter(c => !c.completed).forEach(c => (byCustomer[customerKey(c)] = byCustomer[customerKey(c)] || []).push(c));
     return Object.keys(byCustomer).map(name => ({name, certs: byCustomer[name]}));
   }},
-  'act-open':       {g: 'Activities', label: 'Open activities', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) !== 'Complete')},
-  'act-ns':         {g: 'Activities', label: 'Not Started', kind: 'act', color: 'slate', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Not Started')},
-  'act-ip':         {g: 'Activities', label: 'In Progress', kind: 'act', color: 'gold', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'In Progress')},
-  'act-wait':       {g: 'Activities', label: 'Waiting', kind: 'act', color: 'plum', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Waiting')},
-  'act-overdue':    {g: 'Activities', label: 'Overdue activities', kind: 'act', color: 'rust', items: () => allActivities().filter(x => isActivityOverdue(x.a))},
-  'act-week':       {g: 'Activities', label: 'Activities due this week', kind: 'act', items: () => {
+  'act-open':       {g: 'Tasks', label: 'Open Tasks', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) !== 'Complete')},
+  'act-ns':         {g: 'Tasks', label: 'Not Started', kind: 'act', color: 'slate', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Not Started')},
+  'act-ip':         {g: 'Tasks', label: 'In Progress', kind: 'act', color: 'gold', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'In Progress')},
+  'act-wait':       {g: 'Tasks', label: 'Waiting', kind: 'act', color: 'plum', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Waiting')},
+  'act-overdue':    {g: 'Tasks', label: 'Overdue Tasks', kind: 'act', color: 'rust', items: () => allActivities().filter(x => isActivityOverdue(x.a))},
+  'act-week':       {g: 'Tasks', label: 'Tasks due this week', kind: 'act', items: () => {
     const today = localToday(), last = isoAddDays(today, 7);
     return allActivities().filter(x => activityGroupOf(x.a) !== 'Complete' && x.a.dateDue && x.a.dateDue >= today && x.a.dateDue <= last);
   }},
-  'act-wait14':     {g: 'Activities', label: 'Waiting over 14 days', kind: 'act', color: 'plum', items: () => {
+  'act-wait14':     {g: 'Tasks', label: 'Waiting over 14 days', kind: 'act', color: 'plum', items: () => {
     const cutoff = isoAddDays(localToday(), -14);
     return allActivities().filter(x => activityGroupOf(x.a) === 'Waiting' && x.a.waitingSince && x.a.waitingSince <= cutoff);
   }},
-  'act-done-7':     {g: 'Activities', label: 'Completed in last 7 days', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '') >= isoAddDays(localToday(), -6))},
-  'act-done-month': {g: 'Activities', label: 'Completed this month', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '').slice(0, 7) === localToday().slice(0, 7))},
-  'act-late':       {g: 'Activities', label: 'Completed late', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && x.a.dateDue && x.a.dateCompleted && x.a.dateCompleted > x.a.dateDue)},
+  'act-done-7':     {g: 'Tasks', label: 'Completed in last 7 days', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '') >= isoAddDays(localToday(), -6))},
+  'act-done-month': {g: 'Tasks', label: 'Completed this month', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '').slice(0, 7) === localToday().slice(0, 7))},
+  'act-late':       {g: 'Tasks', label: 'Completed late', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && x.a.dateDue && x.a.dateCompleted && x.a.dateCompleted > x.a.dateDue)},
   'atd-resubmit':   {g: 'FAA ATD', label: 'ATD resubmit due', kind: 'atd', color: 'rust', items: () => atdDevices().filter(atdResubmitDue)},
   'atd-pending':    {g: 'FAA ATD', label: 'ATD pending', kind: 'atd', color: 'slate', items: () => atdDevices().filter(atdPending)},
   'atd-expiring':   {g: 'FAA ATD', label: 'ATD under 365 days', kind: 'atd', color: 'gold', items: () => atdDevices().filter(d => ['yellow', 'red', 'expired'].includes(atdBand(d)))},
@@ -850,116 +871,7 @@ function summaryMeasure(key){
     items: () => certs.filter(c => !c.completed && (c[fieldName] || '').trim() === m[2])};
 }
 
-function loadSummaryBoxes(){
-  try{
-    const saved = JSON.parse(localStorage.getItem(SUMMARY_KEY) || 'null');
-    if(Array.isArray(saved)){
-      const valid = saved.filter(k => typeof k === 'string' && (MEASURES[k] || /^(auth|level):./.test(k))).slice(0, SUMMARY_MAX);
-      if(valid.length) return valid;
-    }
-  }catch(e){}
-  return [...SUMMARY_DEFAULT];
-}
-
-function saveSummaryBoxes(){
-  try{ localStorage.setItem(SUMMARY_KEY, JSON.stringify(summaryBoxes)); }catch(e){}
-}
-
-function measureOptionsHtml(selected){
-  const groups = {};
-  Object.keys(MEASURES).filter(k => EDITOR || !MEASURES[k].editorOnly).forEach(k => (groups[MEASURES[k].g] = groups[MEASURES[k].g] || []).push([k, MEASURES[k].label]));
-  const values = f => [...new Set(certs.map(c => (c[f] || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
-  groups['By authority'] = values('authority').map(v => ['auth:' + v, 'Open \u2013 ' + v]);
-  groups['By level'] = values('level').map(v => ['level:' + v, 'Open \u2013 ' + v]);
-  // Keep a saved choice selectable even if no certification uses that value any more.
-  const sm = summaryMeasure(selected);
-  if(sm && !Object.values(groups).some(list => list.some(([k]) => k === selected))) (groups[sm.g] = groups[sm.g] || []).push([selected, sm.label]);
-  return ['Certifications', 'By authority', 'By level', 'Activities', 'FAA ATD', 'Recent']
-    .filter(g => groups[g] && groups[g].length)
-    .map(g => `<optgroup label="${g}">${groups[g].map(([k, l]) => `<option value="${escapeHtml(k)}" ${k === selected ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}</optgroup>`)
-    .join('');
-}
-
-function renderSummary(){
-  const el = document.getElementById('summary');
-  if(!el) return;
-  if(!summaryBoxes) summaryBoxes = loadSummaryBoxes();
-  const current = view.type === 'list' ? view.key : null;
-  const tools = document.getElementById('summary-tools');
-  if(tools){
-    tools.innerHTML = summaryEditing
-      ? `<button class="link-btn" type="button" onclick="resetSummary()">Reset to default</button><button class="link-btn strong" type="button" onclick="toggleSummaryEdit()">Done</button>`
-      : `<button class="link-btn" type="button" onclick="toggleSummaryEdit()">Customize</button>`;
-  }
-  el.classList.toggle('editing', summaryEditing);
-  const boxes = summaryBoxes.map((key, i) => {
-    const m = summaryMeasure(key);
-    const n = m.items().length;
-    const num = `<span class="sbox-n ${m.color ? 'c-' + m.color : ''}">${n}</span>`;
-    if(summaryEditing){
-      return `
-        <div class="sbox-edit" draggable="true" data-i="${i}">
-          <div class="sbox-tools">
-            <span class="sbox-arrows">
-              <button class="mini-btn" type="button" aria-label="Move left" ${i === 0 ? 'disabled' : ''} onclick="moveSummaryBox(${i}, -1)">${ICON.arrowLeft}</button>
-              <button class="mini-btn" type="button" aria-label="Move right" ${i === summaryBoxes.length - 1 ? 'disabled' : ''} onclick="moveSummaryBox(${i}, 1)">${ICON.arrowRight}</button>
-            </span>
-            <span class="sbox-grip" title="Drag to move" aria-hidden="true">${ICON.grip}</span>
-            ${summaryBoxes.length > 1 ? `<button class="mini-btn danger" type="button" aria-label="Remove box" title="Remove" onclick="removeSummaryBox(${i})">${ICON.x}</button>` : '<span></span>'}
-          </div>
-          <div class="sbox-line">${num}<span class="sbox-l">${escapeHtml(m.label)}</span></div>
-          <select aria-label="What this box shows" onchange="setSummaryBox(${i}, this.value)">${measureOptionsHtml(key)}</select>
-        </div>`;
-    }
-    return `<button class="sbox ${current === key ? 'sel' : ''}" type="button" aria-pressed="${current === key}" title="${escapeHtml(m.label)}" onclick="openSummaryList(${i})">${num}<span class="sbox-l">${escapeHtml(m.label)}</span></button>`;
-  }).join('');
-  el.innerHTML = boxes + (summaryEditing && summaryBoxes.length < SUMMARY_MAX
-    ? `<button class="sbox-add" type="button" onclick="addSummaryBox()">${ICON.plus}<span>Add box</span></button>` : '');
-  const note = document.getElementById('summary-note');
-  if(note) note.textContent = summaryEditing ? `${summaryBoxes.length} of ${SUMMARY_MAX} boxes \u00b7 Use the arrows or drag to reorder \u00b7 Saved in this browser only` : '';
-  if(summaryEditing) wireSummaryDrag(el);
-}
-
-function wireSummaryDrag(el){
-  el.querySelectorAll('.sbox-edit').forEach(box => {
-    box.addEventListener('dragstart', e => { summaryDragFrom = Number(box.dataset.i); box.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try{ e.dataTransfer.setData('text/plain', box.dataset.i); }catch(err){} });
-    box.addEventListener('dragend', () => { box.classList.remove('dragging'); el.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target')); });
-    box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('drop-target'); });
-    box.addEventListener('dragleave', () => box.classList.remove('drop-target'));
-    box.addEventListener('drop', e => {
-      e.preventDefault();
-      const to = Number(box.dataset.i);
-      if(summaryDragFrom !== null && summaryDragFrom !== to){
-        const [moved] = summaryBoxes.splice(summaryDragFrom, 1);
-        summaryBoxes.splice(to, 0, moved);
-        saveSummaryBoxes();
-      }
-      summaryDragFrom = null;
-      renderSummary();
-    });
-  });
-}
-
-function toggleSummaryEdit(){ summaryEditing = !summaryEditing; renderSummary(); }
-function resetSummary(){ summaryBoxes = [...SUMMARY_DEFAULT]; saveSummaryBoxes(); renderSummary(); }
-function setSummaryBox(i, key){ summaryBoxes[i] = key; saveSummaryBoxes(); renderSummary(); }
-function removeSummaryBox(i){ if(summaryBoxes.length > 1){ summaryBoxes.splice(i, 1); saveSummaryBoxes(); renderSummary(); } }
-function moveSummaryBox(i, d){
-  const j = i + d;
-  if(j < 0 || j >= summaryBoxes.length) return;
-  [summaryBoxes[i], summaryBoxes[j]] = [summaryBoxes[j], summaryBoxes[i]];
-  saveSummaryBoxes();
-  renderSummary();
-}
-function addSummaryBox(){
-  if(summaryBoxes.length >= SUMMARY_MAX) return;
-  summaryBoxes.push(Object.keys(MEASURES).find(k => !summaryBoxes.includes(k)) || 'certs-open');
-  saveSummaryBoxes();
-  renderSummary();
-}
-function openSummaryList(i){ navigate({type: 'list', key: summaryBoxes[i]}); }
-
-// ---- Lists opened from the summary bar ----
+// ---- Lists (opened from the home page; the summary bar was removed in 3.1.4) ----
 // Sorted by customer, SN, authority, then due or completion date (no date last).
 const textCmp = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, {sensitivity: 'base', numeric: true});
 const dateCmp = (a, b) => (!a && !b) ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b);
@@ -1403,7 +1315,7 @@ function renderSearchView(){
 
   const tab = view.tab || 'all';
   const all = tab === 'all';
-  const tabs = [['all', 'All', ready ? total : null], ['certs', 'Certifications', certHits.length], ['acts', 'Activities', actHits.length], ['regs', 'Regulations', ready ? regPages : null]];
+  const tabs = [['all', 'All', ready ? total : null], ['certs', 'Certifications', certHits.length], ['acts', 'Tasks', actHits.length], ['regs', 'Regulations', ready ? regPages : null]];
   if(atd.devices.length) tabs.push(['atd', 'ATD devices', atdReady ? atdHits.count : null]);
   if(!atdReady) tabs[0][2] = null;
   const groupHead = (key, label, count) => `<div class="result-group"><b>${label} <span class="title-count">(${count})</span></b>${all && count > 3 ? `<button class="side-tool" type="button" onclick="setSearchTab('${key}')">Show all</button>` : ''}</div>`;
@@ -1414,12 +1326,12 @@ function renderSearchView(){
       rowButton({type: 'cert', id: c.id, from}, `<b class="row-strong">${highlight(customerKey(c), q)}</b> <span class="row-sub">\u00b7 SN: ${highlight(c.serial || '\u2014', q)} \u00b7 ${highlight([c.authority, c.level].filter(Boolean).join(' '), q)}${c.aircraft ? ' \u00b7 ' + highlight(c.aircraft, q) : ''}</span>`, dueText(c.date, c.completed ? c.dateCompleted : '', isOverdue(c)))).join('');
   }
   if(all || tab === 'acts'){
-    if(actHits.length) body += groupHead('acts', 'Activities and comments', actHits.length) + actHits.slice(0, all ? 3 : undefined).map(x => {
+    if(actHits.length) body += groupHead('acts', 'Tasks and comments', actHits.length) + actHits.slice(0, all ? 3 : undefined).map(x => {
       const status = activityStatusLabel(x.a.status);
       const text = x.kind === 'comment' ? x.cm.text : x.a.description;
       return rowButton({type: 'act', certId: x.c.id, activityId: x.a.id, comment: x.kind === 'comment', from},
         `<span class="row-sub">${escapeHtml(customerKey(x.c))} \u00b7 SN: ${escapeHtml(x.c.serial || '\u2014')}</span><br><span class="pill pill-${activityStatusClass(status)}">${escapeHtml(status)}</span>${x.kind === 'comment' ? ICON.comment : ''}${highlight(plainSnippet(text, 200), q)}`,
-        x.kind === 'comment' ? 'Comment' : 'Activity');
+        x.kind === 'comment' ? 'Comment' : 'Task');
     }).join('');
   }
   if(all || tab === 'regs'){
@@ -1605,6 +1517,10 @@ function b64DecodeUtf8(b64){
 // ---- Icons ----
 const svgIcon = (paths, width) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width || 2}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 const ICON = {
+  chevronsLeft: svgIcon('<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>'),
+  chevronsRight: svgIcon('<path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>'),
+  cert: svgIcon('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
+  books: svgIcon('<path d="M4 19V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v14M10 19V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v12M15 19l2.5-12.5a1 1 0 0 1 1.2-.8l1.5.3a1 1 0 0 1 .8 1.2L18.5 19"/><path d="M3 19h18"/>'),
   expandAll: svgIcon('<path d="M7 9l5-5 5 5"/><path d="M7 15l5 5 5-5"/>'),
   collapseAll: svgIcon('<path d="M7 4l5 5 5-5"/><path d="M7 20l5-5 5 5"/>'),
   chevron: svgIcon('<path d="M9 6l6 6-6 6"/>'),
@@ -1712,7 +1628,7 @@ function computeCertStatus(c){
   if(c.completed) return {label: 'Completed', cls: 'sage'};
   if(isCertOverdue(c)) return {label: 'Overdue', cls: 'overdue'};
   const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
-  if(acts.length === 0) return {label: 'No Activity', cls: 'slate'};
+  if(acts.length === 0) return {label: 'No Tasks', cls: 'slate'};
   const anyOpen = acts.some(a => a.status !== 'Complete');
   if(anyOpen) return {label: 'In Progress', cls: 'gold'};
   return {label: 'On Track', cls: 'sage'};
@@ -2027,12 +1943,12 @@ function activityToggleAllBtn(c){
   if(!(Array.isArray(c.activityLog) && c.activityLog.length)) return '';
   const any = activitiesAnyOpen(c);
   const label = any ? 'Collapse all' : 'Expand all';
-  return `<button class="act-toggle-all" type="button" onclick="toggleAllActivities('${c.id}')" title="${label} activities">${any ? ICON.collapseAll : ICON.expandAll}<span>${label}</span></button>`;
+  return `<button class="act-toggle-all" type="button" onclick="toggleAllActivities('${c.id}')" title="${label} tasks">${any ? ICON.collapseAll : ICON.expandAll}<span>${label}</span></button>`;
 }
 
 function renderActivityGroups(c, renderEntry){
   const groups = activityGroups(c);
-  if(!groups.length) return '<div class="changelog-entry"><span class="changelog-text" style="color:var(--ink-faint)">No activities yet</span></div>';
+  if(!groups.length) return '<div class="changelog-entry"><span class="changelog-text" style="color:var(--ink-faint)">No tasks yet</span></div>';
   return '<div class="act-groups">' + groups.map((g, gi) => {
     const done = g.status === 'Complete';
     const n = g.items.length;
@@ -2047,7 +1963,7 @@ function renderActivityGroups(c, renderEntry){
     const open = openActivityGroups.has(activityGroupKey(c.id, g.status));
     const bodyId = `grp-${c.id}-${gi}`;
     return `
-      <button class="act-group" type="button" aria-expanded="${open}" aria-controls="${bodyId}" onclick="toggleActivityGroup('${c.id}', '${g.status}')">${ICON.chevron}<span class="pill pill-${activityStatusClass(g.status)}">${done ? 'Completed' : escapeHtml(g.status)}</span><span class="act-group-count">${n} ${n === 1 ? 'activity' : 'activities'}</span>${overdue ? `<span class="pill pill-overdue">${overdue} overdue</span>` : ''}<span class="act-group-date">${dateNote}</span></button>
+      <button class="act-group" type="button" aria-expanded="${open}" aria-controls="${bodyId}" onclick="toggleActivityGroup('${c.id}', '${g.status}')">${ICON.chevron}<span class="pill pill-${activityStatusClass(g.status)}">${done ? 'Completed' : escapeHtml(g.status)}</span><span class="act-group-count">${n} ${n === 1 ? 'task' : 'tasks'}</span>${overdue ? `<span class="pill pill-overdue">${overdue} overdue</span>` : ''}<span class="act-group-date">${dateNote}</span></button>
       ${open ? `<div class="act-group-body" id="${bodyId}">${g.items.map(a => renderEntry(a)).join('')}</div>` : ''}`;
   }).join('') + '</div>';
 }
@@ -2071,3 +1987,6 @@ function renderDocItem(doc){
   const name = typeof doc === 'string' ? doc : (doc.name || '');
   return escapeHtml(name);
 }
+
+// Collapsed sidebar shows in full on phones; redraw when the window crosses that size.
+try{ window.matchMedia('(max-width: 760px)').addEventListener('change', () => { if(sidebarCollapsed) render(); }); }catch(e){}
