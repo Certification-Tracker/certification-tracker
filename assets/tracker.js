@@ -1,35 +1,18 @@
 // =====================================================================
 // Certification Tracker — shared code for the view-only page and the editor.
-// Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub
-// connection, then calls load(). Everything else lives here.
+// Load order: tracker.js (this file: data, layout, home, lists, search, Regulatory Library),
+// projects.js (Projects pages), atd.js (ATD Approvals), then editor.js on the editor page.
+// Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.1.4';
-const SITE_ROOT = EDITOR ? '../' : '';   // the editor lives one folder down (admin/)
+const VERSION = 'v3.2.0';
 
-// ---- Data and page state ----
-
-let certs = [];
-let activeCustomer = null;
-let activeCertId = null;
-let expandedCustomers = new Set();
-
-// Activities whose comment thread is open, and unsent comment text (both kept only while the page is open).
-const openThreads = new Set();
-
-let sidebarInitialised = false;
-let currentSha = null;
-let lastFetchAt = 0;
-
-const SETTINGS_KEY = 'gh_cert_tracker_settings';
-
-const FILE_PATH_DEFAULT = 'data/certifications.json';
-
-// v3: all data (certifications, library, regulatory PDFs and search indexes) lives in a private repo.
+// v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
-const DATA_REPO = {owner: 'Certification-Tracker', repo: 'tracker-data', branch: 'main', path: FILE_PATH_DEFAULT};
+const SETTINGS_KEY = 'gh_cert_tracker_settings';
 const VIEW_KEY = 'cert-tracker-view-key';
-const SCHEMA_VERSION = 3;
+const FILE_PATH_DEFAULT = 'data/certifications.json';
+const DATA_REPO = {owner: 'Certification-Tracker', repo: 'tracker-data', branch: 'main', path: FILE_PATH_DEFAULT};
 const V2_ARCHIVE_URL = 'https://github.com/wjen5116/Certification-Projects/commits/main';
 
 // Fixed lists keep names consistent (3.0). A value already in the data stays selectable.
@@ -38,34 +21,253 @@ const LEVEL_SUGGESTIONS = ['FNPT I', 'FNPT II', 'FNPT II MCC', 'FTD Level 1', 'F
   'FTD Level 6', 'FFS Level A', 'FFS Level B', 'FFS Level C', 'FFS Level D', 'BITD', 'BATD', 'AATD', 'Level 2 FTD - MCC'];
 const QUAL_STATUSES = ['Pending', 'Conditional', 'Qualified', 'Expired', 'Withdrawn'];
 
-// ---- Where you are ----
-// view is what the main panel shows:
-//   {type:'home'} | {type:'cert', id} | {type:'list', key} | {type:'reg', id, page} | {type:'search', q, tab}
-//   | {type:'doc', cert, doc}  (a certification's Drive document previewed in the main panel)
-//   | {type:'atd'} | {type:'atd-dev', id, doc, page}  (FAA ATD approvals, assets/atd.js)
-// It is kept in the page address, so a refresh keeps your place and any view can be bookmarked.
-const EXPANDED_KEY = 'cert-tracker-expanded';
-const EXPANDED_LIB_KEY = 'cert-tracker-expanded-library';
-let view = parseHash();
-let navFrom = null;        // the list or search a certification/document was opened from (for "Back to …")
-let pendingFocus = null;   // activity to scroll to after the next render
-const expandedAuthorities = new Set();
-let libraryExpandInit = false;
+// =====================================================================
+// Data (3.2): devices and projects
+// data/certifications.json = {schemaVersion: 4, devices: [...], projects: [...]}
+//   device:  one simulator (customer + SN): simModel, simLocation, contactName, contactEmail, docLocation,
+//            and the documents, tasks and document history that apply to every aircraft on it.
+//   project: one aircraft certification on a device: deviceId, authority, country, level, aircraft, date,
+//            qualification, completed, and its own documents, tasks and document history.
+// A project also answers for its device's fields (p.customer, p.serial ...) through read-only getters
+// that are never saved with the project.
+// =====================================================================
+const SCHEMA_VERSION = 4;
+const DEVICE_FIELDS = ['customer', 'serial', 'simModel', 'simLocation', 'contactName', 'contactEmail', 'docLocation'];
 
-try{
-  const savedExpanded = JSON.parse(sessionStorage.getItem(EXPANDED_KEY) || 'null');
-  if(Array.isArray(savedExpanded)) savedExpanded.forEach(n => expandedCustomers.add(n));
-  const savedLib = JSON.parse(sessionStorage.getItem(EXPANDED_LIB_KEY) || 'null');
-  if(Array.isArray(savedLib)){ savedLib.forEach(n => expandedAuthorities.add(n)); libraryExpandInit = true; }
-}catch(e){}
+let devices = [];
+let projects = [];
+let deviceIndex = new Map();
+let projectIndex = new Map();
+let deviceProjects = new Map();
+let currentSha = null;
+let lastFetchAt = 0;
+
+function reindex(){
+  deviceIndex = new Map(devices.map(d => [d.id, d]));
+  projectIndex = new Map(projects.map(p => [p.id, p]));
+  deviceProjects = new Map();
+  projects.forEach(p => {
+    linkProject(p);
+    if(!deviceProjects.has(p.deviceId)) deviceProjects.set(p.deviceId, []);
+    deviceProjects.get(p.deviceId).push(p);
+  });
+}
+
+const deviceById = id => deviceIndex.get(id) || null;
+const projectById = id => projectIndex.get(id) || null;
+const ownerById = id => projectById(id) || deviceById(id);
+const isDevice = o => !!o && deviceIndex.get(o.id) === o;
+const projectsOf = deviceId => deviceProjects.get(deviceId) || [];
+const multiProject = deviceId => projectsOf(deviceId).length > 1;
+const deviceOf = o => isDevice(o) ? o : (o ? deviceById(o.deviceId) : null);
+
+function linkProject(p){
+  if(Object.getOwnPropertyDescriptor(p, 'device')) return p;
+  Object.defineProperty(p, 'device', {get(){ return deviceById(p.deviceId); }, enumerable: false, configurable: true});
+  DEVICE_FIELDS.forEach(k => Object.defineProperty(p, k, {
+    get(){ const d = deviceById(p.deviceId); return d ? (d[k] || '') : ''; },
+    set(){ /* device fields are edited on the device */ },
+    enumerable: false, configurable: true
+  }));
+  return p;
+}
+
+function setData(data){
+  devices = data.devices;
+  projects = data.projects;
+  reindex();
+}
+
+function wrapData(){
+  return {schemaVersion: SCHEMA_VERSION, devices, projects};
+}
+
+const arr = v => Array.isArray(v) ? v : [];
+const isV4 = raw => !!raw && !Array.isArray(raw) && raw.schemaVersion >= 4 && Array.isArray(raw.devices);
+
+function normalizeV4(raw){
+  const devs = arr(raw.devices).filter(d => d && d.id).map(d => ({...d, docs: arr(d.docs), tasks: arr(d.tasks), docChangeLog: arr(d.docChangeLog)}));
+  const projs = arr(raw.projects).filter(p => p && p.id).map(p => ({...p, docs: arr(p.docs), tasks: arr(p.tasks), docChangeLog: arr(p.docChangeLog),
+    qualification: p.qualification && typeof p.qualification === 'object' ? p.qualification : {}}));
+  return {devices: devs, projects: projs};
+}
+
+// Any saved file -> {data, converted, report}. v3 files (and v2 lists) are converted in memory;
+// the editor saves the converted file after showing what changes (editor.js).
+function readData(raw){
+  if(isV4(raw)) return {data: normalizeV4(raw), converted: false};
+  const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.certifications) ? raw.certifications : []);
+  const out = convertToV4(list);
+  return {data: out.data, converted: true, report: out.report};
+}
+
+function slug(s){
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+
+// Deterministic: the same customer and SN always give the same device id.
+function deviceIdFor(customer, serial, fallback){
+  return 'v-' + (slug(customer) || 'unassigned') + '--' + (slug(serial) || slug(fallback) || 'no-sn');
+}
+
+// ---- v3 -> v4 converter ----
+// Also tidies the older formats the editor used to fix on every load (contact text, old task shapes,
+// "Next task" text, plain-text documents, missing ids).
+function legacyProject(c, ci, fix){
+  const p = JSON.parse(JSON.stringify(c));
+  const today = localToday();
+  if(p.primaryContact !== undefined && p.contactName === undefined && p.contactEmail === undefined){
+    const sc = splitContact(p.primaryContact);
+    p.contactName = sc.name; p.contactEmail = sc.email; fix();
+  }
+  delete p.primaryContact;
+  p.tasks = arr(p.activityLog).map((a, i) => {
+    if(!a || typeof a !== 'object') return null;
+    if(a.description === undefined){
+      fix();
+      return {id: a.id || 'a' + ci + '-' + i, description: a.text || '', status: 'Complete', dateCreated: a.date || today,
+        dateDue: '', dateUpdated: a.date || today, dateCompleted: a.date || today};
+    }
+    const t = {...a};
+    if(!t.id){ t.id = 'a' + ci + '-' + i; fix(); }
+    if(!t.status){ t.status = 'Complete'; fix(); }
+    if(t.status === 'Pending'){ t.status = 'Not Started'; fix(); }
+    if(t.status === 'Complete' && !t.dateCompleted){ t.dateCompleted = t.dateUpdated || t.dateCreated || today; fix(); }
+    return t;
+  }).filter(Boolean);
+  if(p.change && String(p.change).trim()){
+    p.tasks.push({id: 'a' + ci + '-next', description: String(p.change).trim(), status: 'Not Started', dateCreated: today, dateDue: '', dateUpdated: today});
+    fix();
+  }
+  delete p.activityLog; delete p.change;
+  p.docs = arr(p.docs).map((d, i) => {
+    const doc = typeof d === 'string' ? (fix(), {name: d, url: ''}) : {...d};
+    if(!doc.id){ doc.id = 'd' + ci + '-' + i; fix(); }
+    return doc;
+  });
+  p.docChangeLog = arr(p.docChangeLog).map((e, i) => e.id ? e : (fix(), {...e, id: 'l' + ci + '-' + i}));
+  p.qualification = p.qualification && typeof p.qualification === 'object' ? p.qualification : {};
+  return p;
+}
+
+function convertToV4(list){
+  const report = {devices: [], conflicts: [], merged: {tasks: 0, docs: 0, history: 0}, fixes: 0, projects: 0};
+  const fix = () => { report.fixes++; };
+  const items = arr(list).filter(c => c && typeof c === 'object').map((c, ci) => legacyProject(c, ci, fix));
+  report.projects = items.length;
+  // Group by customer + SN (a project without an SN is a device of its own).
+  const groups = new Map();
+  items.forEach(p => {
+    const key = (p.customer || '').trim().toLowerCase() + '|' + ((p.serial || '').trim().toLowerCase() || '#' + p.id);
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  });
+  const outDevices = [], outProjects = [];
+  const usedIds = new Set();
+  groups.forEach(group => {
+    const first = group[0];
+    let id = deviceIdFor(first.customer, first.serial, first.id), n = 2;
+    while(usedIds.has(id)) id = deviceIdFor(first.customer, first.serial, first.id) + '-' + (n++);
+    usedIds.add(id);
+    const dev = {id, docs: [], tasks: [], docChangeLog: []};
+    DEVICE_FIELDS.forEach(k => {
+      const values = group.map(p => String(p[k] || '').trim()).filter(Boolean);
+      dev[k] = values[0] || '';
+      const other = [...new Set(values)].filter(v => v !== dev[k]);
+      if(other.length) report.conflicts.push({device: (first.customer || 'Unassigned') + ' / ' + (first.serial || 'no SN'), field: k, kept: dev[k], other});
+    });
+    // Identical items on every aircraft of the device move to the device.
+    if(group.length > 1){
+      const moveCommon = (key, sig, merge) => {
+        const sigs = group.map(p => new Map(p[key].map(x => [sig(x), x])));
+        const common = [...sigs[0].keys()].filter(s => sigs.every(m => m.has(s)));
+        common.forEach(s => {
+          const copies = sigs.map(m => m.get(s));
+          dev[key].push(merge ? merge(copies) : copies[0]);
+          group.forEach((p, i) => { p[key] = p[key].filter(x => x !== copies[i]); });
+        });
+        return common.length;
+      };
+      report.merged.tasks += moveCommon('tasks',
+        t => [String(t.description || '').trim().toLowerCase(), t.status, t.dateDue || '', t.dateCreated || ''].join('|'),
+        copies => {
+          const seen = new Set();
+          const comments = copies.flatMap(t => arr(t.comments)).filter(cm => { const k = (cm.date || '') + '|' + cm.text; if(seen.has(k)) return false; seen.add(k); return true; })
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+          return {...copies[0], comments};
+        });
+      report.merged.docs += moveCommon('docs', d => (d.name || '') + '|' + (d.url || ''));
+      report.merged.history += moveCommon('docChangeLog', e => (e.date || '') + '|' + (e.text || ''));
+    }
+    outDevices.push(dev);
+    report.devices.push({customer: dev.customer || 'Unassigned', serial: dev.serial, projects: group.length});
+    group.forEach(p => {
+      const proj = {id: p.id, deviceId: id};
+      ['name', 'nameAuto', 'authority', 'country', 'level', 'aircraft', 'date', 'completed', 'dateCompleted'].forEach(k => { if(p[k] !== undefined) proj[k] = p[k]; });
+      Object.assign(proj, {qualification: p.qualification, docs: p.docs, tasks: p.tasks, docChangeLog: p.docChangeLog});
+      outProjects.push(proj);
+    });
+  });
+  // Task and document ids stay unique across the file (lookups and page anchors use them).
+  const seenIds = new Set();
+  let k = 0;
+  const unique = (x, prefix) => { if(seenIds.has(x.id)){ x.id = prefix + Date.now().toString(36) + '-' + (k++); report.fixes++; } seenIds.add(x.id); };
+  [...outDevices, ...outProjects].forEach(o => { o.tasks.forEach(t => unique(t, 'a')); o.docs.forEach(d => unique(d, 'd')); });
+  return {data: {devices: outDevices, projects: outProjects}, report};
+}
+
+// ---- Scope: the page you are on (a project, or a device) and the records it shows ----
+// A project page shows its device's items and its own; a device page shows the device's and every project's.
+function scopeOwners(ctx){
+  if(!ctx) return [];
+  if(isDevice(ctx)) return [ctx, ...sortProjects(projectsOf(ctx.id))];
+  const d = ctx.device;
+  return d ? [d, ctx] : [ctx];
+}
+
+function scopedList(ctx, key){
+  return scopeOwners(ctx).flatMap(owner => arr(owner[key]).map(item => ({item, owner})));
+}
+
+// Small tags saying where an item belongs, shown when the device has more than one aircraft.
+function shortProjectLabel(p){ return p.aircraft || p.level || projectName(p); }
+
+function scopeTag(owner, ctx){
+  if(!owner || !multiProject(deviceOf(ctx) ? deviceOf(ctx).id : '')) return '';
+  if(isDevice(owner)) return '<span class="scope-tag dev" title="Applies to every aircraft on this device">All aircraft</span>';
+  if(isDevice(ctx)) return `<span class="scope-tag proj" title="${escapeHtml(projectName(owner))}">${escapeHtml(shortProjectLabel(owner))}</span>`;
+  return '';
+}
+
+// =====================================================================
+// Where you are
+// view is what the main panel shows (kept in the page address, so a refresh keeps your place):
+//   home | projects | device {id} | project {id} | doc {ctx, doc} | list {key} | search {q, tab}
+//   | library | reg {id, page} | atd | atd-dev {id, doc, page} | v2log (editor) | history (editor)
+// =====================================================================
+let view = parseHash();
+let navFrom = null;        // the list or search a page was opened from (for "Back to …")
+let pendingFocus = null;   // task to scroll to after the next render
+const openThreads = new Set();     // tasks whose comment thread is open (kept while the page is open)
+
+// Old list names (3.1) still open.
+const LIST_ALIASES = {'certs-': 'proj-', 'act-': 'task-'};
 
 function parseHash(){
   let h = '';
   try{ h = decodeURIComponent(location.hash.slice(1)); }catch(e){}
   if(!h) return {type: 'home'};
-  if(h.startsWith('list/')) return {type: 'list', key: h.slice(5)};
+  if(h === 'projects') return {type: 'projects'};
+  if(h === 'library') return {type: 'library'};
+  if(h === 'history') return {type: 'history'};
   if(h === 'atd') return {type: 'atd'};
   if(h === 'v2-changelog') return {type: 'v2log'};
+  if(h.startsWith('device/')) return {type: 'device', id: h.slice(7)};
+  if(h.startsWith('list/')){
+    let key = h.slice(5);
+    Object.entries(LIST_ALIASES).forEach(([a, b]) => { if(key.startsWith(a)) key = b + key.slice(a.length); });
+    return {type: 'list', key};
+  }
   if(h.startsWith('atd/')){
     const m = h.slice(4).match(/^([^/]+)(?:\/(loa|qag))?(?:\/p(\d+))?$/);
     return m ? {type: 'atd-dev', id: m[1], doc: m[2] || '', page: Number(m[3]) || 1} : {type: 'atd'};
@@ -73,24 +275,27 @@ function parseHash(){
   if(h.startsWith('search/')) return {type: 'search', q: h.slice(7), tab: 'all'};
   if(h.startsWith('doc/')){
     const parts = h.slice(4).split('/');
-    return {type: 'doc', cert: parts[0], doc: parts[1] || ''};
+    return {type: 'doc', ctx: parts[0], doc: parts[1] || ''};
   }
   if(h.startsWith('reg/')){
     const m = h.slice(4).match(/^(.*?)(?:\/p(\d+))?$/);
     return {type: 'reg', id: m[1], page: Number(m[2]) || 1};
   }
-  return {type: 'cert', id: h};
+  return {type: 'project', id: h};
 }
 
 function viewHash(v){
-  if(v.type === 'cert') return v.id;
-  if(v.type === 'list') return 'list/' + v.key;
-  if(v.type === 'search') return 'search/' + v.q;
-  if(v.type === 'doc') return 'doc/' + v.cert + '/' + v.doc;
-  if(v.type === 'reg') return 'reg/' + v.id + (v.page > 1 ? '/p' + v.page : '');
-  if(v.type === 'atd') return 'atd';
-  if(v.type === 'v2log') return 'v2-changelog';
-  if(v.type === 'atd-dev') return 'atd/' + v.id + (v.doc ? '/' + v.doc : '') + (v.doc && v.page > 1 ? '/p' + v.page : '');
+  switch(v.type){
+    case 'project': return v.id;
+    case 'device': return 'device/' + v.id;
+    case 'projects': case 'library': case 'history': case 'atd': return v.type;
+    case 'list': return 'list/' + v.key;
+    case 'search': return 'search/' + v.q;
+    case 'doc': return 'doc/' + v.ctx + '/' + v.doc;
+    case 'reg': return 'reg/' + v.id + (v.page > 1 ? '/p' + v.page : '');
+    case 'v2log': return 'v2-changelog';
+    case 'atd-dev': return 'atd/' + v.id + (v.doc ? '/' + v.doc : '') + (v.doc && v.page > 1 ? '/p' + v.page : '');
+  }
   return '';
 }
 
@@ -101,10 +306,7 @@ function rememberPlace(){
     // replaceState: update the address without adding a Back-button step per click.
     try{ history.replaceState(null, '', location.pathname + location.search + target); }catch(e){}
   }
-  try{
-    sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedCustomers]));
-    if(libraryExpandInit) sessionStorage.setItem(EXPANDED_LIB_KEY, JSON.stringify([...expandedAuthorities]));
-  }catch(e){}
+  saveTreeState();
 }
 
 // A link pasted into this tab's address bar.
@@ -117,17 +319,9 @@ window.addEventListener('hashchange', () => {
 function navigate(v, from){
   view = v;
   navFrom = from || null;
-  if(v.type === 'cert' || v.type === 'doc'){
-    const c = certs.find(x => x.id === (v.type === 'doc' ? v.cert : v.id));
-    if(c) expandedCustomers.add(customerKey(c));
-  }
-  if(v.type === 'reg'){
-    const d = libraryDoc(v.id);
-    if(d) expandedAuthorities.add(d.authority);
-  }
   render();
   // Phones: the main panel sits below the sidebar, so bring it into view.
-  if(window.matchMedia('(max-width: 760px)').matches && v.type !== 'home'){
+  if(isPhone() && v.type !== 'home'){
     const d = document.getElementById('detail');
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if(d) d.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
@@ -135,7 +329,15 @@ function navigate(v, from){
 }
 
 function goHome(){ navigate({type: 'home'}); }
-function selectCert(id){ navigate({type: 'cert', id}); }
+function openProjects(){ navigate({type: 'projects'}); }
+function openLibrary(){ navigate({type: 'library'}); }
+function openProject(id){ navigate({type: 'project', id}); }
+function openDevice(id){ navigate({type: 'device', id}); }
+// A device with one aircraft opens straight to its project.
+function openDeviceOrProject(id){
+  const list = projectsOf(id);
+  if(list.length === 1) openProject(list[0].id); else openDevice(id);
+}
 
 function goBack(){
   if(!navFrom) return;
@@ -152,42 +354,40 @@ function backLinkHtml(){
   }else{
     label = `Back to results for \u201c${escapeHtml(navFrom.q)}\u201d`;
   }
-  return `<button class="back-link" type="button" onclick="goBack()">${ICON.arrowLeft}<span>${label}</span></button>`;
+  return backBtn(label, 'goBack()');
 }
 
-// ---- Page layout ----
+function backBtn(label, onclick){
+  return `<button class="back-link" type="button" onclick="${onclick}">${ICON.arrowLeft}<span>${label}</span></button>`;
+}
+
+// =====================================================================
+// Page layout
 // The sidebar and main panel are separate containers. The main panel is only redrawn when its
 // content actually changes, so an open PDF, scroll position or comment being typed survives
-// sidebar clicks and background refreshes.
+// background refreshes.
+// =====================================================================
 let lastDetailHtml = null;
 
 function render(){
   regMemo = new Map();
+  reindex();
   syncSearchInput();
   const list = document.getElementById('list');
   if(!list || (EDITOR && !ghConfig)) return;
 
-  if(view.type === 'cert' && !certs.some(c => c.id === view.id)) view = {type: 'home'};
-  if(view.type === 'reg' && libraryLoaded && !libraryDoc(view.id)) view = {type: 'home'};
+  if(view.type === 'project' && !projectById(view.id)) view = {type: 'projects'};
+  if(view.type === 'device' && !deviceById(view.id)) view = {type: 'projects'};
+  if(view.type === 'reg' && libraryLoaded && !libraryDoc(view.id)) view = {type: 'library'};
   if(view.type === 'atd-dev' && atdLoaded && !atdDevice(view.id)) view = {type: 'atd'};
-  if(view.type === 'v2log' && !EDITOR) view = {type: 'home'};
-  if(view.type === 'doc' && !findCertDoc(view.cert, view.doc)) view = certs.some(c => c.id === view.cert) ? {type: 'cert', id: view.cert} : {type: 'home'};
-  const activeCert = view.type === 'cert' ? certs.find(c => c.id === view.id)
-    : view.type === 'doc' ? certs.find(c => c.id === view.cert) : null;
-  activeCertId = activeCert ? activeCert.id : null;
-  activeCustomer = activeCert ? customerKey(activeCert) : null;
-  if(!sidebarInitialised){
-    if(activeCustomer) expandedCustomers.add(activeCustomer);
-    sidebarInitialised = true;
-  }
+  if((view.type === 'v2log' || view.type === 'history') && !EDITOR) view = {type: 'home'};
+  if(view.type === 'doc' && !findScopedDoc(view.ctx, view.doc)) view = ownerById(view.ctx) ? ctxView(ownerById(view.ctx)) : {type: 'projects'};
   rememberPlace();
 
   if(!document.getElementById('detail')){
     list.innerHTML = `
       <div class="layout">
-        <div class="side-col">
-          <nav class="sidebar" id="sidebar" aria-label="Tracker navigation"></nav>
-        </div>
+        <nav class="sidebar" id="sidebar" aria-label="Tracker navigation"></nav>
         <section class="detail" id="detail" aria-live="polite"></section>
       </div>`;
     lastDetailHtml = null;
@@ -195,7 +395,7 @@ function render(){
   document.querySelector('.layout').classList.toggle('side-collapsed', sidebarIsCollapsed());
   document.getElementById('sidebar').innerHTML = renderSidebar();
 
-  const html = renderMain(activeCert);
+  const html = renderMain();
   if(html !== lastDetailHtml){
     document.getElementById('detail').innerHTML = html;
     lastDetailHtml = html;
@@ -203,21 +403,30 @@ function render(){
   afterRender();
 }
 
-function renderMain(activeCert){
-  if(view.type === 'cert' && activeCert) return backLinkHtml() + renderCertDetail(activeCert);
-  if(view.type === 'list') return renderListView(view.key);
-  if(view.type === 'search') return renderSearchView();
-  if(view.type === 'reg') return renderRegView();
-  if(view.type === 'doc' && activeCert) return renderDrivePreview(activeCert);
-  if(view.type === 'atd') return renderAtdView();
-  if(view.type === 'v2log' && EDITOR) return renderV2Log();
-  if(view.type === 'atd-dev') return renderAtdDevice();
+const ctxView = o => isDevice(o) ? {type: 'device', id: o.id} : {type: 'project', id: o.id};
+
+function renderMain(){
+  rowActions = [];
+  switch(view.type){
+    case 'projects': return renderProjectsView();
+    case 'device': return backLinkHtml() + renderDeviceView(deviceById(view.id));
+    case 'project': return backLinkHtml() + renderProjectView(projectById(view.id));
+    case 'doc': return renderDrivePreview();
+    case 'list': return renderListView(view.key);
+    case 'search': return renderSearchView();
+    case 'library': return renderLibraryView();
+    case 'reg': return renderRegView();
+    case 'atd': return renderAtdView();
+    case 'atd-dev': return renderAtdDevice();
+    case 'v2log': return renderV2Log();
+    case 'history': return typeof renderHistoryView === 'function' ? renderHistoryView() : renderHome();
+  }
   return renderHome();
 }
 
 function afterRender(){
   if(pendingFocus){
-    const el = document.getElementById('act-' + pendingFocus);
+    const el = document.getElementById('task-' + pendingFocus);
     pendingFocus = null;
     if(el){
       el.scrollIntoView({block: 'center'});
@@ -229,23 +438,170 @@ function afterRender(){
   if(view.type === 'reg') attachRegPdf();
   if(view.type === 'atd-dev') attachAtdPdf();
   if(view.type === 'v2log' && EDITOR) loadV2Log();
+  if(view.type === 'history' && EDITOR && typeof loadHistory === 'function') loadHistory();
 }
 
+const isPhone = () => window.matchMedia('(max-width: 760px)').matches;
+
+// =====================================================================
+// Sidebar (3.2): Home, Projects, ATD Approvals, Regulatory Library. Everything opens in the main panel.
+// Collapsible to a 44px icon strip (kept per browser); phones always show it in full.
+// =====================================================================
+const SIDEBAR_KEY = 'cert-tracker-sidebar-collapsed';
+let sidebarCollapsed = false;
+try{ sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1'; }catch(e){}
+
+function sidebarIsCollapsed(){ return sidebarCollapsed && !isPhone(); }
+
+function setSidebarCollapsed(on){
+  sidebarCollapsed = !!on;
+  try{ localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0'); }catch(e){}
+  render();
+}
+
+function navItems(){
+  const open = allTasks().filter(x => taskGroupOf(x.a) !== 'Complete');
+  const late = open.filter(x => isTaskOverdue(x.a)).length;
+  const ups = regUpdates().length;
+  const behind = EDITOR && atdLoaded ? kbBehind().length : 0;
+  const t = view.type;
+  return [
+    {label: 'Home', icon: ICON.home, onclick: 'goHome()', active: t === 'home'},
+    {label: 'Projects', icon: ICON.cert, onclick: 'openProjects()', active: ['projects', 'device', 'project', 'doc'].includes(t),
+      badge: open.length ? {n: open.length, cls: late ? 'late' : '', title: countLabel(open.length, 'open task', 'open tasks') + (late ? `, ${late} overdue` : '')} : null},
+    atdLoaded && atd.devices.length ? {label: 'ATD Approvals', icon: ICON.device, onclick: 'openAtd()', active: t === 'atd' || t === 'atd-dev',
+      badge: behind ? {n: behind, cls: 'late', title: 'Knowledge base behind the spreadsheet'} : null} : null,
+    {label: 'Regulatory Library', icon: ICON.books, onclick: 'openLibrary()', active: t === 'library' || t === 'reg',
+      badge: ups ? {n: ups, cls: 'gold', title: countLabel(ups, 'update available', 'updates available')} : null}
+  ].filter(Boolean);
+}
+
+function renderSidebar(){
+  const items = navItems();
+  const badge = b => b ? `<span class="nav-badge ${b.cls}" title="${b.title}">${b.n}</span>` : '';
+  if(sidebarIsCollapsed()){
+    return `<button class="strip-btn strip-toggle" type="button" onclick="setSidebarCollapsed(false)" title="Expand sidebar" aria-label="Expand sidebar" aria-expanded="false">${ICON.chevronsRight}</button>`
+      + items.map(it => `<button class="strip-btn ${it.active ? 'active' : ''}" type="button" onclick="${it.onclick}" title="${it.label}${it.badge ? ' \u00b7 ' + it.badge.title : ''}" aria-label="${it.label}" ${it.active ? 'aria-current="page"' : ''}>${it.icon}${badge(it.badge)}</button>`).join('');
+  }
+  const btn = it => `<button class="side-nav ${it.active ? 'active' : ''}" type="button" onclick="${it.onclick}" ${it.active ? 'aria-current="page"' : ''}>${it.icon}<span class="side-nav-label">${it.label}</span>${badge(it.badge)}</button>`;
+  return `
+    <div class="side-top">${btn(items[0])}<button class="side-collapse" type="button" onclick="setSidebarCollapsed(true)" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">${ICON.chevronsLeft}</button></div>
+    ${items.slice(1).map(btn).join('')}`;
+}
+
+// =====================================================================
+// Home: what needs attention in each section
+// =====================================================================
+const HOME_ROWS_MAX = 6;
+
 function renderHome(){
-  rowActions = [];
-  const customers = new Set(certs.map(customerKey)).size;
-  const docs = library.documents.length;
+  const customers = new Set(devices.map(customerKey)).size;
   return `
     <div class="home">
       <h2 class="home-title">Certification Tracker <span class="home-version">${VERSION}</span></h2>
-      <p class="home-counts">${countLabel(certs.length, 'certification', 'certifications')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(docs, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ' \u00b7 ' + countLabel(atd.devices.length, 'ATD device', 'ATD devices') : ''}</p>
+      <p class="home-counts">${countLabel(projects.length, 'project', 'projects')} \u00b7 ${countLabel(customers, 'customer', 'customers')} \u00b7 ${countLabel(library.documents.length, 'regulatory document', 'regulatory documents')}${atd.devices.length ? ' \u00b7 ' + countLabel(atd.devices.length, 'ATD device', 'ATD devices') : ''}</p>
       ${renderKbBehindNotice()}
       <div class="home-cards">
-        <div class="home-col">${renderCertsHome()}</div>
+        <div class="home-col">${renderProjectsHome()}</div>
         <div class="home-col">${renderAtdHome()}${renderRegHome()}</div>
       </div>
-      <p class="home-hint">Choose a certification, the ATD devices or a regulatory document from the sidebar, or search (press <kbd>/</kbd>).</p>
+      <p class="home-hint">Choose Projects, ATD Approvals or the Regulatory Library from the sidebar, or search (press <kbd>/</kbd>).</p>
     </div>`;
+}
+
+function homeCard(title, headRight, body){
+  return `<section class="home-card"><div class="home-card-head"><b>${title}</b>${headRight || ''}</div>${body}</section>`;
+}
+
+// tags: why the row is there ([label, cls] pairs); action: what clicking it opens (see openRow).
+function homeRow(tags, text, side, action){
+  rowActions.push(action);
+  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="home-tags">${tags.filter(t => t && t[0]).map(([t, c]) => `<span class="pill pill-${c} home-tag">${escapeHtml(t)}</span>`).join('')}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
+}
+
+// "in 4 days" / "tomorrow" / "today" / "2 days overdue", with the date under it (3.1.3).
+function countdownHtml(iso, alert){
+  const n = daysUntil(iso);
+  const label = n < 0 ? `${countLabel(-n, 'day', 'days')} overdue` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+  const cls = n < 0 ? 'cd-late' : (n <= 1 || alert) ? 'cd-soon' : '';
+  return `<b class="countdown ${cls}">${label}</b>${fmtDate(iso).replace(/, \d{4}$/, iso.slice(0, 4) === localToday().slice(0, 4) ? '' : '$&')}`;
+}
+
+function homeClear(text){ return `<div class="home-clear">${text}</div>`; }
+
+function renderProjectsHome(){
+  if(!projects.length) return '';
+  const today = localToday(), week = isoAddDays(today, 7);
+  const open = allTasks().filter(x => taskGroupOf(x.a) !== 'Complete');
+  const projLate = sortProjects(projects.filter(isProjectLate));
+  const taskLate = open.filter(x => isTaskOverdue(x.a)).sort((x, y) => dateCmp(x.a.dateDue, y.a.dateDue));
+  const taskWeek = open.filter(x => !isTaskOverdue(x.a) && x.a.dateDue && x.a.dateDue >= today && x.a.dateDue <= week);
+  const projDue = projectsDueWithin(30);
+  const qualExpired = projects.filter(qualExpiredNow);
+  const qualExp = projects.filter(p => dateWithin(qual(p).expiryDate, 90));
+  const qualCond = projects.filter(p => qual(p).status === 'Conditional');
+  // Waiting: oldest first; several on one page share a row.
+  const waitingBy = {};
+  open.filter(x => taskGroupOf(x.a) === 'Waiting').forEach(x => (waitingBy[x.c.id] = waitingBy[x.c.id] || []).push(x));
+
+  const who = c => escapeHtml(customerKey(c));
+  const taskText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(x.a.description, 90))}`;
+  const taskAction = x => ({type: 'task', ownerId: x.owner.id, taskId: x.a.id});
+  const projText = p => `${who(p)} \u00b7 ${escapeHtml(projectName(p))}`;
+  const projAction = p => ({type: 'project', id: p.id});
+  // One list (3.1.1): soonest date first (overdue items lead), then undated items, oldest Waiting first.
+  // An item that meets several rules is one row carrying each reason.
+  const items = new Map();
+  const add = (key, date, tag, cls, text, action, alert) => {
+    const it = items.get(key) || {date: '', tags: [], text, action};
+    if(tag && !it.tags.some(t => t[0] === tag)) it.tags.push([tag, cls]);
+    if(date && (!it.date || date < it.date)) it.date = date;
+    if(alert) it.alert = true;
+    items.set(key, it);
+  };
+  projLate.forEach(p => add('p' + p.id, p.date, 'Overdue', 'alert-overdue', projText(p), projAction(p)));
+  taskLate.forEach(x => add('t' + x.a.id, x.a.dateDue, 'Overdue', 'alert-overdue', taskText(x), taskAction(x)));
+  qualExpired.forEach(p => add('q' + p.id, qual(p).expiryDate || '', 'Expired', 'alert-overdue', projText(p), projAction(p)));
+  taskWeek.forEach(x => add('t' + x.a.id, x.a.dateDue, null, '', taskText(x), taskAction(x)));
+  qualExp.forEach(p => add('q' + p.id, qual(p).expiryDate, 'Expiring', 'alert-expiring', projText(p), projAction(p), true));
+  projDue.forEach(p => add('p' + p.id, p.date, null, '', projText(p), projAction(p)));
+  qualCond.forEach(p => add('q' + p.id, qual(p).expiryDate || '', 'Conditional', 'gold', projText(p), projAction(p)));
+  Object.values(waitingBy).forEach(list => {
+    const multi = list.length > 1;
+    const due = list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
+    const key = multi ? 'w' + list[0].c.id : 't' + list[0].a.id;
+    add(key, due, 'Waiting', 'plum', multi ? `${who(list[0].c)} \u00b7 ${list.length} tasks` : taskText(list[0]), taskAction(list[0]));
+    const it = items.get(key);
+    if(!it.since) it.since = list.map(x => x.a.waitingSince).filter(Boolean).sort()[0] || '';
+  });
+  const sorted = [...items.values()].sort((a, b) => dateCmp(a.date, b.date) || dateCmp(a.since, b.since));
+  const rows = sorted.map(it => homeRow(it.tags, it.text,
+    it.date ? countdownHtml(it.date, it.alert) : (it.since ? 'since ' + fmtDate(it.since) : 'no date'), it.action));
+  const clear = [];
+  if(!projLate.length && !taskLate.length) clear.push('Nothing overdue');
+  if(!taskWeek.length) clear.push('no tasks due this week');
+  if(!projDue.length) clear.push('no projects due in 30 days');
+  if(!qualExp.length && !qualExpired.length) clear.push('no qualifications expiring in 90 days');
+  if(clear.length) clear[0] = clear[0][0].toUpperCase() + clear[0].slice(1);
+  const lists = [['proj-overdue', projLate.length], ['task-overdue', taskLate.length], ['task-week', taskWeek.length], ['proj-due30', projDue.length],
+    ['qual-exp90', qualExp.length], ['qual-cond', qualCond.length], ['task-wait', Object.values(waitingBy).reduce((n, l) => n + l.length, 0)]].filter(([, n]) => n);
+  const more = rows.length > HOME_ROWS_MAX
+    ? `<div class="home-more">Show all: ${lists.map(([k, n]) => `<button class="text-link" type="button" onclick="navigate({type: 'list', key: '${k}'})">${escapeHtml(summaryMeasure(k).label)} (${n})</button>`).join(' \u00b7 ')}</div>` : '';
+  return homeCard('Projects and Tasks', `<button class="text-link" type="button" onclick="navigate({type: 'list', key: 'task-open'})">${countLabel(open.length, 'open task', 'open tasks')}</button>`,
+    rows.slice(0, HOME_ROWS_MAX).join('') + more + (clear.length ? homeClear(clear.join(' \u00b7 ')) : ''));
+}
+
+function renderRegHome(){
+  if(!library.documents.length) return '';
+  const ups = regUpdates();
+  const failed = EDITOR ? library.documents.filter(d => (regCheck(d.id) || {}).status === 'error') : [];
+  const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
+  const rows = [
+    ...ups.map(d => { const n = projectsUsingDoc(d.id, true).length; return homeRow([['Update', 'gold']], `${escapeHtml(docTitle(d))}${n ? ` <span class="row-sub">\u00b7 ${countLabel(n, 'open project', 'open projects')}</span>` : ''}`, `${escapeHtml(regCheck(d.id).latest || 'newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}`, {type: 'reg', id: d.id, page: 1}); }),
+    ...failed.map(d => homeRow([['Check failed', 'neutral']], escapeHtml(docTitle(d)), 'will retry next week', {type: 'reg', id: d.id, page: 1}))
+  ];
+  return homeCard('Regulatory Library', `<button class="text-link" type="button" onclick="openLibrary()">Open Regulatory Library ${ICON.arrowRight}</button>`,
+    rows.join('') + (ups.length ? '' : homeClear(when ? `All current \u00b7 ${countLabel(library.documents.length, 'document', 'documents')} \u00b7 checked ${when}` : 'Not checked yet')));
 }
 
 // ---- v2 change log (editor only): archived in the private data repo at archive/changelog-v2.html ----
@@ -265,627 +621,70 @@ function loadV2Log(){
 function renderV2Log(){
   return `
     <div class="detail-context">Editor / Archive</div>
-    <h2 class="detail-title">v2 change log</h2>
+    <h2 class="detail-title">v2 Change Log</h2>
     <div class="doc-meta">v2.1.1 to v2.5.0, the tracker before v3. For each version's code, see <a href="${V2_ARCHIVE_URL}" target="_blank" rel="noopener">v2 revision history</a>.</div>
     <div class="v2log">${v2LogHtml === null ? '<div class="muted list-empty">Loading\u2026</div>'
       : v2LogHtml || '<div class="muted list-empty">Couldn\u2019t load archive/changelog-v2.html from the data repo.</div>'}</div>`;
 }
 
-// ---- Home summary cards: what needs attention in each sidebar section ----
-const HOME_ROWS_MAX = 6;
-
-function homeCard(title, headRight, body){
-  return `<section class="home-card"><div class="home-card-head"><b>${title}</b>${headRight || ''}</div>${body}</section>`;
-}
-
-// tag: why the row is there; action: what clicking it opens (see openRow).
-// tag may be a list of [label, cls] pairs when a row has several reasons.
-function homeRow(tag, cls, text, side, action){
-  rowActions.push(action);
-  const tags = Array.isArray(tag) ? tag : [[tag, cls]];
-  return `<button class="home-row" type="button" onclick="openRow(${rowActions.length - 1})"><span class="home-tags">${tags.filter(t => t && t[0]).map(([t, c]) => `<span class="pill pill-${c} home-tag">${escapeHtml(t)}</span>`).join('')}</span><span class="home-row-text">${text}</span><span class="home-row-side">${side || ''}</span></button>`;
-}
-
-// "in 4 days" / "tomorrow" / "today" / "2 days overdue", with the date under it (3.1.3).
-// Tomorrow, today and expiring items show in amber; overdue in red.
-function countdownHtml(iso, alert){
-  const n = daysUntil(iso);
-  const label = n < 0 ? `${countLabel(-n, 'day', 'days')} overdue` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
-  const cls = n < 0 ? 'cd-late' : (n <= 1 || alert) ? 'cd-soon' : '';
-  return `<b class="countdown ${cls}">${label}</b>${fmtDate(iso).replace(/, \d{4}$/, iso.slice(0, 4) === localToday().slice(0, 4) ? '' : '$&')}`;
-}
-
-function homeClear(text){ return `<div class="home-clear">${text}</div>`; }
-
-function renderCertsHome(){
-  if(!certs.length) return '';
-  const today = localToday(), week = isoAddDays(today, 7);
-  const acts = allActivities().filter(x => activityGroupOf(x.a) !== 'Complete');
-  const certOverdue = sortCerts(certs.filter(isOverdue));
-  const actOverdue = acts.filter(x => isActivityOverdue(x.a)).sort((x, y) => dateCmp(x.a.dateDue, y.a.dateDue));
-  const actWeek = acts.filter(x => !isActivityOverdue(x.a) && x.a.dateDue && x.a.dateDue >= today && x.a.dateDue <= week).sort((x, y) => dateCmp(x.a.dateDue, y.a.dateDue));
-  const certDue = certsDueWithin(30).sort((a, b) => dateCmp(a.date, b.date));
-  const qualExpired = certs.filter(c => { const n = daysUntil(qual(c).expiryDate); return (n !== null && n < 0) || qual(c).status === 'Expired'; });
-  const qualExp = certs.filter(c => dateWithin(qual(c).expiryDate, 90)).sort((a, b) => dateCmp(qual(a).expiryDate, qual(b).expiryDate));
-  const qualCond = certs.filter(c => qual(c).status === 'Conditional');
-  // Waiting: oldest first; several from one certification share a row.
-  const waitingByCert = {};
-  acts.filter(x => activityGroupOf(x.a) === 'Waiting').forEach(x => (waitingByCert[x.c.id] = waitingByCert[x.c.id] || []).push(x));
-  const waiting = Object.values(waitingByCert).map(list => {
-    const dated = list.map(x => x.a.waitingSince).filter(Boolean).sort();
-    return {list, since: dated[0] || ''};
-  }).sort((a, b) => dateCmp(a.since, b.since) || textCmp(customerKey(a.list[0].c), customerKey(b.list[0].c)));
-
-  const who = c => escapeHtml(customerKey(c));
-  const actText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(x.a.description || x.a.text, 90))}`;
-  const actAction = x => ({type: 'act', certId: x.c.id, activityId: x.a.id});
-  const certText = c => `${who(c)} \u00b7 ${escapeHtml(certName(c))}`;
-  const certAction = c => ({type: 'cert', id: c.id});
-  // One list (3.1.1): soonest date first (overdue items lead), then undated items, oldest Waiting first.
-  // An item that meets several rules is one row carrying each reason.
-  const items = new Map();
-  // tag: a reason the countdown can't show (Overdue, Expiring, Waiting...); null when the date says it all (3.1.3).
-  const add = (key, date, tag, cls, text, action, alert) => {
-    const it = items.get(key) || {date: '', tags: [], text, action};
-    if(tag && !it.tags.some(t => t[0] === tag)) it.tags.push([tag, cls]);
-    if(date && (!it.date || date < it.date)) it.date = date;
-    if(alert) it.alert = true;
-    items.set(key, it);
-  };
-  certOverdue.forEach(c => add('c' + c.id, c.date, 'Overdue', 'alert-overdue', certText(c), certAction(c)));
-  actOverdue.forEach(x => add('a' + x.a.id, x.a.dateDue, 'Overdue', 'alert-overdue', actText(x), actAction(x)));
-  qualExpired.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Expired', 'alert-overdue', certText(c), certAction(c)));
-  actWeek.forEach(x => add('a' + x.a.id, x.a.dateDue, null, '', actText(x), actAction(x)));
-  qualExp.forEach(c => add('q' + c.id, qual(c).expiryDate, 'Expiring', 'alert-expiring', certText(c), certAction(c), true));
-  certDue.forEach(c => add('c' + c.id, c.date, null, '', certText(c), certAction(c)));
-  qualCond.forEach(c => add('q' + c.id, qual(c).expiryDate || '', 'Conditional', 'gold', certText(c), certAction(c)));
-  waiting.forEach(w => {
-    const multi = w.list.length > 1;
-    const due = w.list.map(x => x.a.dateDue).filter(Boolean).sort()[0] || '';
-    const key = multi ? 'w' + w.list[0].c.id : 'a' + w.list[0].a.id;
-    add(key, due, 'Waiting', 'plum', multi ? `${who(w.list[0].c)} \u00b7 ${w.list.length} tasks` : actText(w.list[0]), actAction(w.list[0]));
-    const it = items.get(key);
-    if(!it.since) it.since = w.since;
-  });
-  const sorted = [...items.values()].sort((a, b) => dateCmp(a.date, b.date) || dateCmp(a.since, b.since));
-  const rows = sorted.map(it => homeRow(it.tags, null, it.text,
-    it.date ? countdownHtml(it.date, it.alert) : (it.since ? 'since ' + fmtDate(it.since) : 'no date'), it.action));
-  const clear = [];
-  if(!certOverdue.length && !actOverdue.length) clear.push('Nothing overdue');
-  if(!actWeek.length) clear.push('no tasks due this week');
-  if(!certDue.length) clear.push('no certifications due in 30 days');
-  if(!qualExp.length && !qualExpired.length) clear.push('no qualifications expiring in 90 days');
-  if(clear.length) clear[0] = clear[0][0].toUpperCase() + clear[0].slice(1);
-  const lists = [['certs-overdue', certOverdue.length], ['act-overdue', actOverdue.length], ['act-week', actWeek.length], ['certs-due30', certDue.length],
-    ['qual-exp90', qualExp.length], ['qual-cond', qualCond.length], ['act-wait', waiting.reduce((n, w) => n + w.list.length, 0)]].filter(([, n]) => n);
-  const more = rows.length > HOME_ROWS_MAX
-    ? `<div class="home-more">Show all: ${lists.map(([k, n]) => `<button class="text-link" type="button" onclick="navigate({type: 'list', key: '${k}'})">${escapeHtml(summaryMeasure(k).label)} (${n})</button>`).join(' \u00b7 ')}</div>` : '';
-  return homeCard('Certifications and Tasks', `<button class="text-link" type="button" onclick="navigate({type: 'list', key: 'act-open'})">${countLabel(acts.length, 'open task', 'open tasks')}</button>`,
-    rows.slice(0, HOME_ROWS_MAX).join('') + more + (clear.length ? homeClear(clear.join(' \u00b7 ')) : ''));
-}
-
-function renderRegHome(){
-  if(!library.documents.length) return '';
-  const ups = regUpdates();
-  const failed = EDITOR ? library.documents.filter(d => (regCheck(d.id) || {}).status === 'error') : [];
-  const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
-  const rows = [
-    ...ups.map(d => { const n = certsUsingDoc(d.id, true).length; return homeRow('Update', 'gold', `${escapeHtml(docTitle(d))}${n ? ` <span class="row-sub">\u00b7 ${countLabel(n, 'open certification', 'open certifications')}</span>` : ''}`, `${escapeHtml(regCheck(d.id).latest || 'newer version')} \u00b7 yours: ${escapeHtml(yourCopy(d))}`, {type: 'reg', id: d.id, page: 1}); }),
-    ...failed.map(d => homeRow('Check failed', 'neutral', escapeHtml(docTitle(d)), 'will retry next week', {type: 'reg', id: d.id, page: 1}))
+// =====================================================================
+// Lists (opened from the home page)
+// =====================================================================
+function allTasks(){
+  // c: what the row names (the project, or the device for tasks shared by every aircraft); owner: where the task is stored.
+  return [
+    ...devices.flatMap(d => arr(d.tasks).map(a => ({a, owner: d, c: projectsOf(d.id).length === 1 ? projectsOf(d.id)[0] : d}))),
+    ...projects.flatMap(p => arr(p.tasks).map(a => ({a, owner: p, c: p})))
   ];
-  return homeCard('Regulatory library', `<span class="home-card-note">${countLabel(library.documents.length, 'document', 'documents')}</span>`,
-    rows.join('') + (ups.length ? '' : homeClear(when ? `All current \u00b7 checked ${when}` : 'Not checked yet')));
 }
 
-function countLabel(n, one, many){
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-// ---- Sidebar ----
-// ---- Collapsible sidebar (3.1.4): a 40px icon strip; the choice is kept per browser. Phones always show it in full. ----
-const SIDEBAR_KEY = 'cert-tracker-sidebar-collapsed';
-let sidebarCollapsed = false;
-try{ sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1'; }catch(e){}
-
-function sidebarIsCollapsed(){ return sidebarCollapsed && !isPhone(); }
-
-function setSidebarCollapsed(on){
-  sidebarCollapsed = !!on;
-  try{ localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0'); }catch(e){}
-  render();
-}
-
-function renderSidebarStrip(){
-  const openTasks = allActivities().filter(x => activityGroupOf(x.a) !== 'Complete').length;
-  const lateTasks = allActivities().some(x => isActivityOverdue(x.a));
-  const icon = (label, svg, onclick, active, badge) =>
-    `<button class="strip-btn ${active ? 'active' : ''}" type="button" onclick="${onclick}" title="${label}" aria-label="${label}">${svg}${badge || ''}</button>`;
-  return `
-    <button class="strip-btn strip-toggle" type="button" onclick="setSidebarCollapsed(false)" title="Expand sidebar" aria-label="Expand sidebar" aria-expanded="false">${ICON.chevronsRight}</button>
-    ${icon('Home', ICON.home, 'goHome()', view.type === 'home')}
-    ${icon(`Certifications \u00b7 ${countLabel(openTasks, 'open task', 'open tasks')}`, ICON.cert, 'setSidebarCollapsed(false)', view.type === 'cert' || view.type === 'doc',
-      openTasks ? `<span class="strip-badge${lateTasks ? ' late' : ''}">${openTasks}</span>` : '')}
-    ${atdLoaded && atd.devices.length ? icon('FAA ATD approvals', ICON.device, 'openAtd()', view.type === 'atd' || view.type === 'atd-dev') : ''}
-    ${library.documents.length ? icon('Regulatory library', ICON.books, 'setSidebarCollapsed(false)', view.type === 'reg') : ''}`;
-}
-
-function renderSidebar(){
-  if(sidebarIsCollapsed()) return renderSidebarStrip();
-  prepareLibraryExpansion();   // before the header, so Expand all / Collapse all matches what's open
-  return `
-    <div class="side-home-wrap"><button class="side-home ${view.type === 'home' ? 'active' : ''}" type="button" onclick="goHome()" ${view.type === 'home' ? 'aria-current="page"' : ''}>${ICON.home}<span>Home</span></button><button class="side-collapse" type="button" onclick="setSidebarCollapsed(true)" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">${ICON.chevronsLeft}</button></div>
-    ${sideSectionHead('Certifications', `${EDITOR ? `<button class="side-tool" type="button" onclick="openModal(null, '', 'customer')">+ Add</button>` : ''}${allCustomerKeys().length ? toggleAllBtn(allCustomerKeys().some(k => expandedCustomers.has(k)), 'toggleAllCustomers()') : ''}`)}
-    ${certs.length ? '<div class="side-col-label">Projects open / total</div>' : ''}
-    ${renderCustomerList()}
-    ${renderAtdSidebar()}
-    ${sideSectionHead('Regulatory library', `${EDITOR ? `<button class="side-tool" type="button" onclick="openLibraryModal()">+ Add</button>` : ''}${libraryAuthorities().length ? toggleAllBtn(libraryAuthorities().some(a => expandedAuthorities.has(a)), 'toggleAllAuthorities()') : ''}`)}
-    ${renderLibraryList()}`;
-}
-
-function sideSectionHead(title, tools){
-  return `<div class="side-section"><span class="side-section-title">${title}</span><span class="side-section-tools">${tools}</span></div>`;
-}
-
-function toggleAllBtn(anyOpen, onclick){
-  return `<button class="side-tool" type="button" onclick="${onclick}">${anyOpen ? 'Collapse all' : 'Expand all'}</button>`;
-}
-
-function renderCustomerList(){
-  if(!certs.length) return `<div class="side-empty">No certifications yet</div>`;
-  const groups = {};
-  certs.forEach(c => {
-    const key = customerKey(c);
-    (groups[key] = groups[key] || []).push(c);
-  });
-  const order = Object.keys(groups).sort((a,b) => a.localeCompare(b, undefined, {sensitivity: 'base', numeric: true}));
-  return order.map(customer => {
-    const items = sortCerts(groups[customer]);
-    const anyOverdue = items.some(isCertOverdue);
-    const open = expandedCustomers.has(customer);
-    // Customer line (3.1.2): open projects / total projects.
-    const total = items.length;
-    const openCount = items.filter(x => !x.completed).length;
-    // Active certifications first (grouped by serial), completed ones last.
-    const bySerial = arr => { const g = groupBySerial(arr); return g.order.flatMap(k => g.groups[k]); };
-    const ordered = [...bySerial(items.filter(x => !x.completed)), ...bySerial(items.filter(x => x.completed))];
-    return `
-      <div class="side-customer ${customer === activeCustomer ? 'has-active' : ''}">
-        <button class="side-customer-btn" aria-expanded="${open}" onclick="toggleCustomer('${escapeAttr(customer)}')">
-          <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
-          <span class="side-customer-name">${escapeHtml(customer)}</span>
-          ${anyOverdue ? '<span class="tab-overdue-dot" title="Has overdue items"></span>' : ''}
-          <span class="tab-count${openCount ? '' : ' zero'}" title="${openCount} open of ${countLabel(total, 'project', 'projects')}"><b>${openCount}</b>/${total}</span>
-        </button>
-        ${open ? `
-        <div class="side-certs">
-          ${ordered.map(x => {
-              const st = computeCertStatus(x);
-              const isActive = x.id === activeCertId;
-              return `
-              <button class="side-cert ${isActive ? 'active' : ''}" ${isActive ? 'aria-current="true"' : ''} title="${escapeHtml(certName(x))}" onclick="selectCert('${x.id}')">
-                ${x.completed ? '<span class="status-dot status-spacer" aria-hidden="true"></span>' : `<span class="status-dot dot-${st.cls}" title="${st.label}"></span>`}
-                <span class="side-cert-name"><span class="side-sn-line"><span>SN: ${escapeHtml(x.serial || '\u2014')}${x.completed ? ' <span class="side-done-tag">Completed</span>' : ''}</span>${sideActCount(x)}</span>${(x.authority || x.level) ? `<span class="side-cert-auth">${escapeHtml([x.authority, x.level].filter(Boolean).join(' - '))}</span>` : ''}${x.aircraft ? `<span class="side-cert-auth">${escapeHtml(x.aircraft)}</span>` : ''}</span>
-              </button>`;
-            }).join('')}
-          ${EDITOR ? actionBtn('plus', 'Add project', `openModal(null, '${escapeAttr(customer)}')`, {cls: 'side-add', compact: false}) : ''}
-        </div>` : ''}
-      </div>`;
-  }).join('');
-}
-
-// SIM SN line (3.1.3): "n open" tasks at the end of the line; red when one is overdue; nothing when none are open.
-function sideActCount(c){
-  const open = (Array.isArray(c.activityLog) ? c.activityLog : []).filter(a => activityGroupOf(a) !== 'Complete');
-  if(!open.length) return '';
-  const late = open.some(isActivityOverdue);
-  return `<span class="side-open${late ? ' late' : ''}" title="${countLabel(open.length, 'open task', 'open tasks')}${late ? ', overdue' : ''}">${open.length} open</span>`;
-}
-
-function allCustomerKeys(){
-  return [...new Set(certs.map(customerKey))];
-}
-
-function toggleAllCustomers(){
-  const keys = allCustomerKeys();
-  if(keys.some(k => expandedCustomers.has(k))) expandedCustomers.clear();
-  else keys.forEach(k => expandedCustomers.add(k));
-  render();
-}
-
-// ---- Certification details ----
-function renderCertDetail(c){
-  const over = isOverdue(c);
-  const status = computeCertStatus(c);
-  const field = (label, value) => `<div><div class="fk">${label}</div><div class="fv">${value}</div></div>`;
-  return `
-    <div class="detail-head">
-      <div>
-        <div class="detail-context">${escapeHtml(customerKey(c))}${c.serial ? ' / ' + escapeHtml(c.serial) : ''}</div>
-        <h2 class="detail-title">${escapeHtml(certName(c))}</h2>
-        ${c.completed ? `<div class="detail-completed">Completed ${fmtDate(c.dateCompleted)}</div>` : ''}
-      </div>
-      <span class="pill pill-${status.cls}">${status.label}</span>
-    </div>
-    ${EDITOR ? `
-    <div class="detail-actions">
-      ${c.completed
-        ? actionBtn('reopen', 'Reopen', `reopenCert('${c.id}')`)
-        : actionBtn('check', 'Mark complete', `completeCert('${c.id}')`, {cls: 'ok'})}
-      ${actionBtn('edit', 'Edit', `openModal('${c.id}')`)}
-      ${actionBtn('trash', 'Delete', `removeCert('${c.id}')`, {cls: 'danger'})}
-    </div>` : ''}
-    <div class="field-grid">
-      ${field('SIM location', escapeHtml((EDITOR ? c.simLocation : publicLocation(c.simLocation)) || '\u2014'))}
-      ${field('Certifying country', escapeHtml(c.country || '\u2014'))}
-      ${field('Regulatory authority', escapeHtml(c.authority || '\u2014'))}
-      ${field('SIM serial number', escapeHtml(c.serial || '\u2014'))}
-      ${field('SIM model', escapeHtml(certModel(c) || '\u2014'))}
-      ${field('Aircraft type', escapeHtml(c.aircraft || '\u2014'))}
-      ${field('Certification level', escapeHtml(c.level || '\u2014'))}
-      ${field('Regulation', regulationHtml(c))}
-      <div><div class="fk">Due date</div><div class="fv ${over ? 'due-cell overdue' : ''}">${fmtDate(c.date)}${over ? ' <span class="pill pill-overdue">Overdue</span>' : ''}</div></div>
-      ${field('Contact name', escapeHtml(contactName(c) || '\u2014'))}
-      ${EDITOR ? field('Contact email', contactEmail(c) ? `<a href="mailto:${escapeHtml(contactEmail(c))}">${escapeHtml(contactEmail(c))}</a>` : '\u2014') : ''}
-    </div>
-    ${renderCertAtdLinks(c)}
-    ${renderQualification(c)}
-    ${renderDocumentsSection(c)}
-    ${renderActivityLog(c)}`;
-}
-
-// ---- Qualification (3.0): what the authority granted, and when it lapses ----
-function qual(c){ return c.qualification && typeof c.qualification === 'object' ? c.qualification : {}; }
-
-function hasQualification(c){ return Object.entries(qual(c)).some(([k, v]) => !['basis', 'basisRevision', 'basisDocId'].includes(k) && String(v || '').trim()); }
-
-function daysUntil(iso){
-  if(!iso) return null;
-  return Math.round((new Date(iso + 'T00:00:00') - new Date(localToday() + 'T00:00:00')) / 86400000);
-}
-
-function dateWithin(iso, days){ const n = daysUntil(iso); return n !== null && n >= 0 && n <= days; }
-
-function qualStatusCls(s){
-  return {Qualified: 'sage', Conditional: 'gold', Pending: 'slate', Expired: 'overdue', Withdrawn: 'plum'}[s] || 'slate';
-}
-
-function dueNote(iso){
-  const n = daysUntil(iso);
-  if(n === null) return '';
-  if(n < 0) return ` <span class="pill pill-overdue">${countLabel(-n, 'day', 'days')} ago</span>`;
-  if(n <= 90) return ` <span class="pill pill-gold">in ${countLabel(n, 'day', 'days')}</span>`;
-  return '';
-}
-
-// ---- Regulation (3.1): the library document a certification is qualified against ----
-// Set automatically from the authority and level; Edit can pick another (qualification.basis). A completed
-// certification keeps the issue it was qualified under (qualification.basisRevision).
-// Hungary (CAA-HU) and Greece (HCAA) work to EASA's CS-FSTD(A).
-const REG_RULES = [
-  {auth: /^(EASA|CAA-HU|HCAA)$/i, docAuth: 'EASA', title: /CS-FSTD/i},
-  {auth: /^UK CAA$/i, docAuth: 'UK CAA', title: /CS-FSTD/i},
-  {auth: /^FAA$/i, level: /ATD/i, docAuth: 'FAA', title: /61-136/},
-  {auth: /^FAA$/i, docAuth: 'FAA', title: /Part 60/i},
-  {auth: /^Transport Canada$/i, docAuth: 'Transport Canada', title: /9685/}
-];
-
-function autoRegulation(c){
-  const auth = (c.authority || '').trim(), level = (c.level || '').trim();
-  const rule = REG_RULES.find(r => r.auth.test(auth) && (!r.level || r.level.test(level)));
-  if(!rule) return null;
-  return library.documents.find(d => (d.authority || '') === rule.docAuth && rule.title.test(d.title || '')) || null;
-}
-
-// {doc, auto, revision, locked} or null. Worked out once per screen update (cleared in render()).
-let regMemo = new Map();
-function certRegulation(c){
-  if(regMemo.has(c)) return regMemo.get(c);
-  const r = findRegulation(c);
-  regMemo.set(c, r);
-  return r;
-}
-
-function findRegulation(c){
-  const q = qual(c);
-  const locked = !!(c.completed && (q.basisRevision || q.basisDocId));
-  const chosen = q.basis ? libraryDoc(q.basis) : null;
-  const doc = (locked && q.basisDocId && libraryDoc(q.basisDocId)) || chosen || autoRegulation(c);
-  if(!doc) return null;
-  return {doc, auto: !chosen, locked, revision: locked ? q.basisRevision : (doc.revision || '')};
-}
-
-function regulationHtml(c){
-  const r = certRegulation(c);
-  if(!r) return EDITOR && libraryLoaded && (c.authority || '').trim() ? '<span class="muted">No matching document in the library</span>' : '\u2014';
-  const outdated = r.locked && r.doc.revision && r.revision !== r.doc.revision;
-  return `<button class="link-inline" type="button" onclick="openDoc('${r.doc.id}')">${escapeHtml(docTitle(r.doc))}${r.revision ? ' ' + escapeHtml(r.revision) : ''}</button>`
-    + (c.completed ? (outdated ? ` <span class="muted reg-note-inline">(qualified under ${escapeHtml(r.revision)}; library has ${escapeHtml(r.doc.revision)})</span>` : '') : regBadge(r.doc.id))
-    + (EDITOR && r.auto ? ' <span class="mode-tag">Automatic</span>' : '');
-}
-
-// Records the regulation and issue in force when a certification is completed (editor saves it).
-function lockRegulation(c){
-  regMemo = new Map();
-  const q = {...qual(c)};
-  delete q.basisRevision; delete q.basisDocId;
-  c.qualification = q;
-  const r = certRegulation(c);
-  if(r) c.qualification = {...q, basisDocId: r.doc.id, basisRevision: r.doc.revision || ''};
-}
-
-function unlockRegulation(c){
-  regMemo = new Map();
-  if(!c.qualification) return;
-  delete c.qualification.basisRevision;
-  delete c.qualification.basisDocId;
-}
-
-// Open certifications that use a library document (for update flags).
-function certsUsingDoc(id, openOnly){
-  return certs.filter(c => (!openOnly || !c.completed) && ((certRegulation(c) || {}).doc || {}).id === id);
-}
-
-function renderQualification(c){
-  const q = qual(c);
-  if(!hasQualification(c) && !EDITOR) return '';
-  const field = (label, value) => `<div><div class="fk">${label}</div><div class="fv">${value}</div></div>`;
-  return `
-    <div class="changelog qual-section">
-      <div class="fk section-head"><span>Qualification ${q.status ? `<span class="pill pill-${qualStatusCls(q.status)}">${escapeHtml(q.status)}</span>` : ''}</span>${EDITOR ? actionBtn('edit', 'Edit', `openModal('${c.id}', '', '', 'qual')`, {compact: false}) : ''}</div>
-      ${hasQualification(c) ? `
-      <div class="field-grid">
-        ${field('Certificate / LOA number', escapeHtml(q.certificateNumber || '\u2014'))}
-        ${field('Issued', fmtDate(q.issueDate))}
-        ${field('Expires', fmtDate(q.expiryDate) + dueNote(q.expiryDate))}
-        ${field('Next evaluation', fmtDate(q.nextEvaluation) + dueNote(q.nextEvaluation))}
-      </div>
-      ${q.conditions ? `<div class="field-grid qual-conditions"><div class="span-all">${''}<div class="fk">Conditions</div><div class="fv">${escapeHtml(q.conditions).replace(/\n/g, '<br>')}</div></div></div>` : ''}`
-      : `<div class="muted qual-empty">No qualification details yet. Use Edit to add the status, certificate number and dates once the authority issues them.</div>`}
-    </div>`;
-}
-
-function sectionHead(title, addOnclick){
-  return EDITOR
-    ? `<div class="fk section-head"><span>${title}</span>${actionBtn('plus', 'Add', addOnclick, {compact: false})}</div>`
-    : `<div class="fk">${title}</div>`;
-}
-
-function renderDocumentsSection(c){
-  const docs = Array.isArray(c.docs) ? c.docs : [];
-  return `
-    <div class="changelog">
-      ${sectionHead('Documents', `openDocumentModal('${c.id}')`)}
-      ${docs.length ? docs.map(d => {
-        const actions = previewBtn(c, d) + viewBtn(d) + (EDITOR
-          ? actionBtn('edit', 'Edit', `openDocumentModal('${c.id}', '${d.id}')`) + actionBtn('trash', 'Delete', `deleteDocument('${c.id}', '${d.id}')`, {cls: 'danger'})
-          : '');
-        return `
-        <div class="activity-entry">
-          <div class="activity-entry-top">
-            <span class="changelog-text">${renderDocItem(d)}</span>
-            ${actions ? `<div class="cert-actions">${actions}</div>` : ''}
-          </div>
-        </div>`;
-      }).join('') : '<div class="changelog-entry"><span class="changelog-text muted">No documents yet</span></div>'}
-      ${c.docLocation ? `<div style="margin-top:6px;">${renderDocLocation(c.docLocation)}</div>` : ''}
-      ${renderDocHistory(c)}
-    </div>`;
-}
-
-// Document history (3.1): recorded automatically when documents change; shown collapsed under Documents.
-const openDocHistory = new Set();
-
-function toggleDocHistory(id){
-  if(openDocHistory.has(id)) openDocHistory.delete(id); else openDocHistory.add(id);
-  render();
-}
-
-function renderDocHistory(c){
-  const entries = Array.isArray(c.docChangeLog) ? c.docChangeLog : [];
-  if(!entries.length && !EDITOR) return '';
-  const open = openDocHistory.has(c.id);
-  const sorted = [...entries].sort((a,b) => (b.date||'').localeCompare(a.date||'') || (b.ts || 0) - (a.ts || 0));
-  return `
-    <div class="doc-history">
-      <button class="comments-toggle" type="button" aria-expanded="${open}" onclick="toggleDocHistory('${c.id}')">${ICON.chevron}<span>History (${entries.length})</span></button>
-      ${open ? `<div class="doc-history-body">
-      ${EDITOR ? `<button class="side-tool doc-history-add" type="button" onclick="openChangeLogModal('${c.id}')">+ Add entry</button>` : ''}
-      ${sorted.length ? sorted.map(entry => `
-        <div class="changelog-entry ${EDITOR ? 'changelog-editable' : ''}">
-          <div class="changelog-main">
-            <span class="changelog-date">${fmtDate(entry.date)}${entry.time ? ', ' + entry.time : ''}</span>
-            <span class="changelog-text">${escapeHtml(entry.text)}</span>
-          </div>
-          ${EDITOR ? `<div class="cert-actions">
-            ${actionBtn('edit', 'Edit', `openChangeLogModal('${c.id}', '${entry.id}')`)}
-            ${actionBtn('trash', 'Delete', `deleteChangeLogEntry('${c.id}', '${entry.id}')`, {cls: 'danger'})}
-          </div>` : ''}
-        </div>`).join('') : '<div class="changelog-entry"><span class="changelog-text muted">No entries yet</span></div>'}
-      </div>` : ''}
-    </div>`;
-}
-
-function renderActivityLog(c){
-  const entry = a => {
-    const over = isActivityOverdue(a);
-    const status = activityStatusLabel(a.status);
-    const cls = activityStatusClass(status);
-    return `
-        <div class="activity-entry" id="act-${a.id}">
-          <div class="activity-entry-top">
-            <div>
-              <span class="pill pill-${cls}">${escapeHtml(status)}</span>
-              <span class="changelog-text rich-text">${formatText(a.description || a.text || '')}</span>
-            </div>
-            ${EDITOR ? `<div class="cert-actions">
-              ${status !== 'Complete'
-                ? actionBtn('check', 'Complete', `markActivityComplete('${c.id}', '${a.id}')`, {cls: 'ok'})
-                : actionBtn('reopen', 'Reopen', `reopenActivity('${c.id}', '${a.id}')`)}
-              ${actionBtn('edit', 'Edit', `openActivityModal('${c.id}', '${a.id}')`)}
-              ${actionBtn('trash', 'Delete', `deleteActivity('${c.id}', '${a.id}')`, {cls: 'danger'})}
-            </div>` : ''}
-          </div>
-          <div class="activity-meta">
-            Entered ${fmtDate(a.dateCreated)}${a.timeCreated ? ', ' + a.timeCreated : ''}
-            ${a.dateDue ? ` \u00b7 Due ${fmtDate(a.dateDue)}${over ? ' <span class="pill pill-overdue">Overdue</span>' : ''}` : ''}
-            ${a.dateUpdated && a.dateUpdated !== a.dateCreated ? ` \u00b7 Updated ${fmtDate(a.dateUpdated)}${a.timeUpdated ? ', ' + a.timeUpdated : ''}` : ''}
-            ${status === 'Waiting' && a.waitingSince ? ` \u00b7 Waiting since ${fmtDate(a.waitingSince)}` : ''}
-            ${a.dateCompleted ? ` \u00b7 Completed ${fmtDate(a.dateCompleted)}${a.timeCompleted ? ', ' + a.timeCompleted : ''}${lateNote(a)}` : ''}
-          </div>
-          ${renderComments(c, a)}
-        </div>`;
-  };
-  return `
-    <div class="changelog">
-      <div class="fk act-head">
-        <span>Tasks</span>
-        <div class="act-head-tools">
-          ${activityToggleAllBtn(c)}
-          ${EDITOR ? actionBtn('plus', 'Add', `openActivityModal('${c.id}')`, {compact: false}) : ''}
-        </div>
-      </div>
-      ${renderActivityGroups(c, entry)}
-    </div>`;
-}
-
-// ---- Activity comments ----
-// Each activity keeps a running thread: comments: [{id, text, date, time}], oldest first.
-// The editor can add and delete comments; the view-only page shows them.
-const commentDrafts = {};
-
-function renderComments(c, a){
-  const list = Array.isArray(a.comments) ? a.comments : [];
-  const n = list.length;
-  const open = openThreads.has(a.id);
-  const key = c.id + '|' + a.id;
-  let thread = '';
-  if(open){
-    const items = n ? list.map(cm => `
-        <div class="comment">
-          <div style="min-width:0;">
-            <div class="comment-text rich-text">${formatText(cm.text)}</div>
-            <div class="comment-stamp">${fmtDate(cm.date)}${cm.time ? ', ' + escapeHtml(cm.time) : ''}</div>
-          </div>
-          ${EDITOR ? `<button class="comment-del" type="button" title="Delete comment" aria-label="Delete comment" onclick="deleteComment('${c.id}', '${a.id}', '${cm.id}')">${ICON.x}</button>` : ''}
-        </div>`).join('') : '<div class="comment-empty">No comments yet</div>';
-    const form = EDITOR ? `
-        <div class="comment-add">
-          <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment('${c.id}', '${a.id}'); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
-          <button class="btn-primary" type="button" onclick="addComment('${c.id}', '${a.id}')">Add</button>
-        </div>
-        <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>` : '';
-    thread = `<div class="comment-thread" id="thread-${a.id}"><div class="comment-list">${items}</div>${form}</div>`;
-  }
-  return `
-          <button class="comments-toggle" type="button" aria-expanded="${open}" aria-controls="thread-${a.id}" onclick="toggleComments('${a.id}')">${ICON.chevron}Comments <span class="${n ? '' : 'cc-zero'}">(${n})</span></button>
-          ${thread}`;
-}
-
-function toggleComments(activityId){
-  if(openThreads.has(activityId)) openThreads.delete(activityId);
-  else openThreads.add(activityId);
-  render();
-  if(openThreads.has(activityId)){
-    const box = document.getElementById('cmt-' + activityId);
-    if(box) box.focus({preventScroll: true});
-  }
-}
-
-// =====================================================================
-// Summary bar: each person picks the boxes shown (saved in this browser)
-// =====================================================================
-function isoAddDays(iso, n){
-  const d = new Date(iso + 'T00:00:00');
-  d.setDate(d.getDate() + n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function allActivities(){
-  return certs.flatMap(c => (Array.isArray(c.activityLog) ? c.activityLog : []).map(a => ({c, a})));
-}
-
-function certsDueWithin(days){
+function projectsDueWithin(days){
   const today = localToday(), last = isoAddDays(today, days);
-  return certs.filter(c => !c.completed && c.date && c.date >= today && c.date <= last);
+  return projects.filter(p => !p.completed && p.date && p.date >= today && p.date <= last);
 }
 
-// Each measure: g = dropdown group, label, kind (what its list shows), color, items().
+const qualExpiredNow = p => { const n = daysUntil(qual(p).expiryDate); return (n !== null && n < 0) || qual(p).status === 'Expired'; };
+const tasksWhere = test => allTasks().filter(x => test(x.a));
+
+// Each list: g = group, label, kind (what its rows show), color, items().
 const MEASURES = {
-  'certs-all':      {g: 'Certifications', label: 'All certifications', kind: 'cert', items: () => certs},
-  'certs-open':     {g: 'Certifications', label: 'Open certifications', kind: 'cert', items: () => certs.filter(c => !c.completed)},
-  'certs-overdue':  {g: 'Certifications', label: 'Overdue', kind: 'cert', color: 'rust', items: () => certs.filter(isOverdue)},
-  'certs-due7':     {g: 'Certifications', label: 'Due in 7 days', kind: 'cert', items: () => certsDueWithin(7)},
-  'certs-due30':    {g: 'Certifications', label: 'Due in 30 days', kind: 'cert', items: () => certsDueWithin(30)},
-  'certs-due60':    {g: 'Certifications', label: 'Due in 60 days', kind: 'cert', items: () => certsDueWithin(60)},
-  'certs-due90':    {g: 'Certifications', label: 'Due in 90 days', kind: 'cert', items: () => certsDueWithin(90)},
-  'certs-nodue':    {g: 'Certifications', label: 'No due date', kind: 'cert', items: () => certs.filter(c => !c.completed && !c.date)},
-  'certs-done':     {g: 'Certifications', label: 'Completed', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed)},
-  'certs-done-year':{g: 'Certifications', label: 'Completed this year', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed && (c.dateCompleted || '').slice(0, 4) === localToday().slice(0, 4))},
-  'certs-done-30':  {g: 'Certifications', label: 'Completed in last 30 days', kind: 'cert', color: 'sage', items: () => certs.filter(c => c.completed && (c.dateCompleted || '') >= isoAddDays(localToday(), -29))},
-  'certs-noact':    {g: 'Certifications', label: 'No tasks logged', kind: 'cert', items: () => certs.filter(c => !c.completed && !(c.activityLog || []).length)},
-  'qual-exp90':     {g: 'Qualifications', label: 'Expiring in 90 days', kind: 'cert', color: 'rust', items: () => certs.filter(c => dateWithin(qual(c).expiryDate, 90))},
-  'qual-exp180':    {g: 'Qualifications', label: 'Expiring in 180 days', kind: 'cert', items: () => certs.filter(c => dateWithin(qual(c).expiryDate, 180))},
-  'qual-expired':   {g: 'Qualifications', label: 'Expired', kind: 'cert', color: 'rust', items: () => certs.filter(c => { const n = daysUntil(qual(c).expiryDate); return (n !== null && n < 0) || qual(c).status === 'Expired'; })},
-  'qual-eval90':    {g: 'Qualifications', label: 'Evaluation due in 90 days', kind: 'cert', items: () => certs.filter(c => dateWithin(qual(c).nextEvaluation, 90))},
-  'qual-cond':      {g: 'Qualifications', label: 'Conditional', kind: 'cert', color: 'gold', items: () => certs.filter(c => qual(c).status === 'Conditional')},
-  'qual-none':      {g: 'Qualifications', label: 'Completed, no qualification details', kind: 'cert', items: () => certs.filter(c => c.completed && !hasQualification(c))},
-  'customers-open': {g: 'Certifications', label: 'Customers with open work', kind: 'customer', items: () => {
-    const byCustomer = {};
-    certs.filter(c => !c.completed).forEach(c => (byCustomer[customerKey(c)] = byCustomer[customerKey(c)] || []).push(c));
-    return Object.keys(byCustomer).map(name => ({name, certs: byCustomer[name]}));
-  }},
-  'act-open':       {g: 'Tasks', label: 'Open Tasks', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) !== 'Complete')},
-  'act-ns':         {g: 'Tasks', label: 'Not Started', kind: 'act', color: 'slate', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Not Started')},
-  'act-ip':         {g: 'Tasks', label: 'In Progress', kind: 'act', color: 'gold', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'In Progress')},
-  'act-wait':       {g: 'Tasks', label: 'Waiting', kind: 'act', color: 'plum', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Waiting')},
-  'act-overdue':    {g: 'Tasks', label: 'Overdue Tasks', kind: 'act', color: 'rust', items: () => allActivities().filter(x => isActivityOverdue(x.a))},
-  'act-week':       {g: 'Tasks', label: 'Tasks due this week', kind: 'act', items: () => {
+  'proj-all':      {label: 'All projects', kind: 'project', items: () => projects},
+  'proj-open':     {label: 'Open projects', kind: 'project', items: () => projects.filter(p => !p.completed)},
+  'proj-overdue':  {label: 'Overdue projects', kind: 'project', color: 'rust', items: () => projects.filter(isProjectLate)},
+  'proj-due30':    {label: 'Projects due in 30 days', kind: 'project', items: () => projectsDueWithin(30)},
+  'proj-due90':    {label: 'Projects due in 90 days', kind: 'project', items: () => projectsDueWithin(90)},
+  'proj-done':     {label: 'Completed projects', kind: 'project', color: 'sage', items: () => projects.filter(p => p.completed)},
+  'qual-exp90':    {label: 'Qualifications expiring in 90 days', kind: 'project', color: 'rust', items: () => projects.filter(p => dateWithin(qual(p).expiryDate, 90))},
+  'qual-expired':  {label: 'Expired qualifications', kind: 'project', color: 'rust', items: () => projects.filter(qualExpiredNow)},
+  'qual-cond':     {label: 'Conditional qualifications', kind: 'project', color: 'gold', items: () => projects.filter(p => qual(p).status === 'Conditional')},
+  'task-open':     {label: 'Open Tasks', kind: 'task', items: () => tasksWhere(a => taskGroupOf(a) !== 'Complete')},
+  'task-wait':     {label: 'Waiting', kind: 'task', color: 'plum', items: () => tasksWhere(a => taskGroupOf(a) === 'Waiting')},
+  'task-overdue':  {label: 'Overdue Tasks', kind: 'task', color: 'rust', items: () => tasksWhere(isTaskOverdue)},
+  'task-week':     {label: 'Tasks due in 7 days', kind: 'task', items: () => {
     const today = localToday(), last = isoAddDays(today, 7);
-    return allActivities().filter(x => activityGroupOf(x.a) !== 'Complete' && x.a.dateDue && x.a.dateDue >= today && x.a.dateDue <= last);
+    return tasksWhere(a => taskGroupOf(a) !== 'Complete' && a.dateDue && a.dateDue >= today && a.dateDue <= last);
   }},
-  'act-wait14':     {g: 'Tasks', label: 'Waiting over 14 days', kind: 'act', color: 'plum', items: () => {
-    const cutoff = isoAddDays(localToday(), -14);
-    return allActivities().filter(x => activityGroupOf(x.a) === 'Waiting' && x.a.waitingSince && x.a.waitingSince <= cutoff);
-  }},
-  'act-done-7':     {g: 'Tasks', label: 'Completed in last 7 days', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '') >= isoAddDays(localToday(), -6))},
-  'act-done-month': {g: 'Tasks', label: 'Completed this month', kind: 'act', color: 'sage', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && (x.a.dateCompleted || '').slice(0, 7) === localToday().slice(0, 7))},
-  'act-late':       {g: 'Tasks', label: 'Completed late', kind: 'act', items: () => allActivities().filter(x => activityGroupOf(x.a) === 'Complete' && x.a.dateDue && x.a.dateCompleted && x.a.dateCompleted > x.a.dateDue)},
-  'atd-resubmit':   {g: 'FAA ATD', label: 'ATD resubmit due', kind: 'atd', color: 'rust', items: () => atdDevices().filter(atdResubmitDue)},
-  'atd-pending':    {g: 'FAA ATD', label: 'ATD pending', kind: 'atd', color: 'slate', items: () => atdDevices().filter(atdPending)},
-  'atd-expiring':   {g: 'FAA ATD', label: 'ATD under 365 days', kind: 'atd', color: 'gold', items: () => atdDevices().filter(d => ['yellow', 'red', 'expired'].includes(atdBand(d)))},
-  'atd-kb-behind':  {g: 'FAA ATD', label: 'KB behind spreadsheet', kind: 'atd', color: 'rust', editorOnly: true, items: () => EDITOR ? kbBehind() : []},
-  'cm-7':           {g: 'Recent', label: 'Comments in last 7 days', kind: 'comment', items: () => {
-    const since = isoAddDays(localToday(), -6);
-    return allActivities().flatMap(x => (x.a.comments || []).filter(cm => (cm.date || '') >= since).map(cm => ({...x, cm})));
-  }}
+  'atd-resubmit':  {label: 'ATD resubmit due', kind: 'atd', color: 'rust', items: () => atd.devices.filter(atdResubmitDue)},
+  'atd-pending':   {label: 'ATD pending', kind: 'atd', color: 'slate', items: () => atd.devices.filter(atdPending)},
+  'atd-kb-behind': {label: 'KB behind spreadsheet', kind: 'atd', color: 'rust', items: () => EDITOR ? kbBehind() : []}
 };
 
-// Measures by authority or level are keyed "auth:FAA", "level:AATD" and built from the data.
-function summaryMeasure(key){
-  if(MEASURES[key]) return {key, ...MEASURES[key]};
-  const m = String(key).match(/^(auth|level):(.+)$/);
-  if(!m) return null;
-  const fieldName = m[1] === 'auth' ? 'authority' : 'level';
-  return {key, g: m[1] === 'auth' ? 'By authority' : 'By level', label: 'Open \u2013 ' + m[2], kind: 'cert',
-    items: () => certs.filter(c => !c.completed && (c[fieldName] || '').trim() === m[2])};
-}
+function summaryMeasure(key){ return MEASURES[key] ? {key, ...MEASURES[key]} : null; }
 
-// ---- Lists (opened from the home page; the summary bar was removed in 3.1.4) ----
 // Sorted by customer, SN, authority, then due or completion date (no date last).
 const textCmp = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, {sensitivity: 'base', numeric: true});
 const dateCmp = (a, b) => (!a && !b) ? 0 : !a ? 1 : !b ? -1 : a.localeCompare(b);
-const certSortCmp = (a, b) => textCmp(customerKey(a), customerKey(b)) || textCmp(a.serial, b.serial) || textCmp(a.authority, b.authority);
-const certDate = c => c.completed ? c.dateCompleted : c.date;
-const actDate = a => activityGroupOf(a) === 'Complete' ? a.dateCompleted : a.dateDue;
+const ownerSortCmp = (a, b) => textCmp(customerKey(a), customerKey(b)) || textCmp(a.serial, b.serial) || textCmp(a.authority, b.authority);
+const projDate = p => p.completed ? p.dateCompleted : p.date;
+const taskDate = a => taskGroupOf(a) === 'Complete' ? a.dateCompleted : a.dateDue;
 let rowActions = [];   // what each clickable row in the main panel opens
 
 function sortListItems(kind, items){
   const list = [...items];
-  if(kind === 'cert') return list.sort((a, b) => certSortCmp(a, b) || dateCmp(certDate(a), certDate(b)));
-  if(kind === 'act') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(actDate(x.a), actDate(y.a)));
-  if(kind === 'comment') return list.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(y.cm.date, x.cm.date));
+  if(kind === 'project') return list.sort((a, b) => ownerSortCmp(a, b) || dateCmp(projDate(a), projDate(b)));
+  if(kind === 'task') return list.sort((x, y) => ownerSortCmp(x.c, y.c) || dateCmp(taskDate(x.a), taskDate(y.a)));
   if(kind === 'atd') return atdOrdered(list);
-  return list.sort((a, b) => textCmp(a.name, b.name));
+  return list;
 }
 
 function dueText(due, done, overdue){
@@ -894,8 +693,9 @@ function dueText(due, done, overdue){
   return 'No due date';
 }
 
-function certLine(c){
-  return `<b class="row-strong">${escapeHtml(customerKey(c))}</b> <span class="row-sub">\u00b7 SN: ${escapeHtml(c.serial || '\u2014')}${(c.authority || c.level) ? ' \u00b7 ' + escapeHtml([c.authority, c.level].filter(Boolean).join(' ')) : ''}</span>`;
+// "Customer · SN: … · Authority Level" (a device line has no authority).
+function ownerLine(c){
+  return `<b class="row-strong">${escapeHtml(customerKey(c))}</b> <span class="row-sub">\u00b7 SN: ${escapeHtml(c.serial || '\u2014')}${(c.authority || c.level) ? ' \u00b7 ' + escapeHtml([c.authority, c.level].filter(Boolean).join(' ')) : (isDevice(c) ? ' \u00b7 all aircraft' : '')}</span>`;
 }
 
 function plainSnippet(s, max){
@@ -909,48 +709,41 @@ function rowButton(action, left, right){
 }
 
 function listRowHtml(kind, item, from){
-  if(kind === 'cert'){
-    return rowButton({type: 'cert', id: item.id, from}, certLine(item), dueText(item.date, item.completed ? item.dateCompleted : '', isOverdue(item)));
-  }
+  if(kind === 'project') return rowButton({type: 'project', id: item.id, from}, ownerLine(item), dueText(item.date, item.completed ? item.dateCompleted : '', isProjectLate(item)));
   if(kind === 'atd') return rowButton({type: 'atd', id: item.id, from}, atdLine(item), atdRowSide(item));
-  if(kind === 'customer'){
-    const first = sortCerts(item.certs)[0];
-    return rowButton({type: 'cert', id: first.id, from}, `<b class="row-strong">${escapeHtml(item.name)}</b>`, countLabel(item.certs.length, 'open certification', 'open certifications'));
-  }
   const {c, a} = item;
-  const status = activityStatusLabel(a.status);
-  const pill = `<span class="pill pill-${activityStatusClass(status)}">${escapeHtml(status)}</span>`;
-  if(kind === 'comment'){
-    return rowButton({type: 'act', certId: c.id, activityId: a.id, comment: true, from},
-      `${certLine(c)}<br>${ICON.comment}<span>${escapeHtml(plainSnippet(item.cm.text, 160))}</span><br><span class="row-sub">On: ${escapeHtml(plainSnippet(a.description, 90))}</span>`,
-      fmtDate(item.cm.date));
-  }
-  return rowButton({type: 'act', certId: c.id, activityId: a.id, from},
-    `${certLine(c)}<br>${pill}${escapeHtml(plainSnippet(a.description || a.text, 180))}${status === 'Waiting' && a.waitingSince ? ` <span class="row-sub">\u00b7 Waiting since ${fmtDate(a.waitingSince)}</span>` : ''}`,
-    dueText(a.dateDue, status === 'Complete' ? a.dateCompleted : '', isActivityOverdue(a)));
+  const status = taskStatusLabel(a.status);
+  return rowButton({type: 'task', ownerId: item.owner.id, taskId: a.id, from},
+    `${ownerLine(c)}<br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${escapeHtml(plainSnippet(a.description, 180))}${status === 'Waiting' && a.waitingSince ? ` <span class="row-sub">\u00b7 Waiting since ${fmtDate(a.waitingSince)}</span>` : ''}`,
+    dueText(a.dateDue, status === 'Complete' ? a.dateCompleted : '', isTaskOverdue(a)));
 }
 
 function openRow(i){
   const act = rowActions[i];
   if(!act) return;
-  if(act.type === 'cert') return navigate({type: 'cert', id: act.id}, act.from);
+  if(act.type === 'project') return navigate({type: 'project', id: act.id}, act.from);
+  if(act.type === 'device') return navigate({type: 'device', id: act.id}, act.from);
   if(act.type === 'reg') return navigate({type: 'reg', id: act.id, page: act.page}, act.from);
   if(act.type === 'atd') return navigate({type: 'atd-dev', id: act.id, doc: act.doc || '', page: act.page || 1}, act.from);
-  if(act.type === 'act'){
-    const c = certs.find(x => x.id === act.certId);
-    const a = c && (c.activityLog || []).find(x => x.id === act.activityId);
-    if(!a) return;
-    openActivityGroups.add(activityGroupKey(c.id, activityGroupOf(a)));
-    if(act.comment) openThreads.add(a.id);
-    pendingFocus = a.id;
-    navigate({type: 'cert', id: c.id}, act.from);
-  }
+  if(act.type === 'task') openTask(act.ownerId, act.taskId, act.comment, act.from);
+}
+
+// Opens the page a task is shown on, with its group (and comments, if asked) open and the task highlighted.
+function openTask(ownerId, taskId, comment, from){
+  const owner = ownerById(ownerId);
+  const a = owner && arr(owner.tasks).find(x => x.id === taskId);
+  if(!a) return;
+  let target = owner;
+  if(isDevice(owner) && projectsOf(owner.id).length === 1) target = projectsOf(owner.id)[0];
+  openTaskGroups.add(taskGroupKey(target.id, taskGroupOf(a)));
+  if(comment) openThreads.add(a.id);
+  pendingFocus = a.id;
+  navigate(ctxView(target), from);
 }
 
 function renderListView(key){
   const m = summaryMeasure(key);
   if(!m) return renderHome();
-  rowActions = [];
   const items = sortListItems(m.kind, m.items());
   const from = {type: 'list', key};
   return `
@@ -960,9 +753,164 @@ function renderListView(key){
 }
 
 // =====================================================================
-// Regulatory library: stored PDFs (regs/ folder) listed in data/library.json
+// Projects: shared rules (pages are in projects.js)
 // =====================================================================
-let library = {documents: [], searchResetAt: '', searchTally: {}};
+function customerKey(o){ return (o.customer || 'Unassigned').trim() || 'Unassigned'; }
+
+// SIM model is read from the serial: skip a leading "R-" prefix, take the letters before the digits
+// (R-MCX-100251 -> MCX, FMX-0297 -> FMX). A typed model overrides it.
+function detectModel(serial){
+  const m = String(serial || '').trim().toUpperCase().match(/^(?:R-)?([A-Z]+)(?=[-\s]?\d)/);
+  return m ? m[1] : '';
+}
+
+function simModel(o){ return (o.simModel || '').trim() || detectModel(o.serial); }
+
+// "Authority Level - Aircraft (Model)", e.g. "UK CAA FNPT II - Piper PA-28-181 Archer (MCX)"
+function autoName(p){
+  let n = [p.authority, p.level].map(x => (x || '').trim()).filter(Boolean).join(' ');
+  const aircraft = (p.aircraft || '').trim();
+  if(aircraft) n = n ? `${n} - ${aircraft}` : aircraft;
+  const model = simModel(p);
+  if(model) n = n ? `${n} (${model})` : model;
+  return n;
+}
+
+// Projects without the nameAuto flag keep their typed names.
+function projectName(p){
+  if(p.nameAuto) return autoName(p) || p.name || 'Untitled project';
+  return p.name || autoName(p) || 'Untitled project';
+}
+
+function isProjectLate(p){ return !p.completed && !!p.date && daysUntil(p.date) < 0; }
+
+function projectTasks(p){ return scopedList(p, 'tasks').map(x => x.item); }
+
+function projectHasOverdue(p){
+  return !p.completed && (isProjectLate(p) || projectTasks(p).some(isTaskOverdue));
+}
+
+function projectStatus(p){
+  if(p.completed) return {label: 'Completed', cls: 'sage'};
+  if(projectHasOverdue(p)) return {label: 'Overdue', cls: 'overdue'};
+  const tasks = projectTasks(p);
+  if(!tasks.length) return {label: 'No Tasks', cls: 'slate'};
+  if(tasks.some(a => taskGroupOf(a) !== 'Complete')) return {label: 'In Progress', cls: 'gold'};
+  return {label: 'On Track', cls: 'sage'};
+}
+
+// Open first, overdue first, then by due date.
+function sortProjects(items){
+  return [...items].sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0)
+    || (projectHasOverdue(a) ? 0 : 1) - (projectHasOverdue(b) ? 0 : 1)
+    || (a.date || '9999').localeCompare(b.date || '9999'));
+}
+
+// ---- Qualification (3.0): what the authority granted, and when it lapses ----
+function qual(p){ return p.qualification && typeof p.qualification === 'object' ? p.qualification : {}; }
+
+function hasQualification(p){ return Object.entries(qual(p)).some(([k, v]) => !['basis', 'basisRevision', 'basisDocId'].includes(k) && String(v || '').trim()); }
+
+function qualStatusCls(s){
+  return {Qualified: 'sage', Conditional: 'gold', Pending: 'slate', Expired: 'overdue', Withdrawn: 'plum'}[s] || 'slate';
+}
+
+// ---- Regulation (3.1): the library document a project is qualified against ----
+// Set automatically from the authority and level; Edit can pick another (qualification.basis). A completed
+// project keeps the issue it was qualified under (qualification.basisRevision).
+// Hungary (CAA-HU) and Greece (HCAA) work to EASA's CS-FSTD(A).
+const REG_RULES = [
+  {auth: /^(EASA|CAA-HU|HCAA)$/i, docAuth: 'EASA', title: /CS-FSTD/i},
+  {auth: /^UK CAA$/i, docAuth: 'UK CAA', title: /CS-FSTD/i},
+  {auth: /^FAA$/i, level: /ATD/i, docAuth: 'FAA', title: /61-136/},
+  {auth: /^FAA$/i, docAuth: 'FAA', title: /Part 60/i},
+  {auth: /^Transport Canada$/i, docAuth: 'Transport Canada', title: /9685/}
+];
+
+function regRule(p){
+  const auth = (p.authority || '').trim(), level = (p.level || '').trim();
+  return REG_RULES.find(r => r.auth.test(auth) && (!r.level || r.level.test(level))) || null;
+}
+
+// The library authority a project works to (EASA for CAA-HU and HCAA).
+function regAuthority(p){ const r = regRule(p); return r ? r.docAuth : (p.authority || '').trim(); }
+
+function autoRegulation(p){
+  const rule = regRule(p);
+  if(!rule) return null;
+  return library.documents.find(d => (d.authority || '') === rule.docAuth && rule.title.test(d.title || '')) || null;
+}
+
+// {doc, auto, revision, locked} or null. Worked out once per screen update (cleared in render()).
+let regMemo = new Map();
+function projectRegulation(p){
+  if(regMemo.has(p)) return regMemo.get(p);
+  const q = qual(p);
+  const locked = !!(p.completed && (q.basisRevision || q.basisDocId));
+  const chosen = q.basis ? libraryDoc(q.basis) : null;
+  const doc = (locked && q.basisDocId && libraryDoc(q.basisDocId)) || chosen || autoRegulation(p);
+  const r = doc ? {doc, auto: !chosen, locked, revision: locked ? q.basisRevision : (doc.revision || '')} : null;
+  regMemo.set(p, r);
+  return r;
+}
+
+// "EASA CS-FSTD(A) Issue 2" (the revision isn't repeated when the title already has it).
+function regLabel(doc, revision){
+  return docTitle(doc) + (revision && !String(doc.title || '').includes(revision) ? ' ' + revision : '');
+}
+
+function regulationHtml(p){
+  const r = projectRegulation(p);
+  if(!r) return EDITOR && libraryLoaded && (p.authority || '').trim() ? '<span class="muted">No matching document in the library</span>' : '\u2014';
+  const outdated = r.locked && r.doc.revision && r.revision !== r.doc.revision;
+  return `<button class="link-inline" type="button" onclick="openDoc('${r.doc.id}')">${escapeHtml(regLabel(r.doc, r.revision))}</button>`
+    + (p.completed ? (outdated ? ` <span class="muted reg-note-inline">(qualified under ${escapeHtml(r.revision)}; library has ${escapeHtml(r.doc.revision)})</span>` : '') : regBadge(r.doc.id))
+    + (EDITOR && r.auto ? ' <span class="mode-tag">Automatic</span>' : '');
+}
+
+// Records the regulation and issue in force when a project is completed (the editor saves it).
+function lockRegulation(p){
+  regMemo = new Map();
+  const q = {...qual(p)};
+  delete q.basisRevision; delete q.basisDocId;
+  p.qualification = q;
+  const r = projectRegulation(p);
+  if(r) p.qualification = {...q, basisDocId: r.doc.id, basisRevision: r.doc.revision || ''};
+}
+
+function unlockRegulation(p){
+  regMemo = new Map();
+  if(!p.qualification) return;
+  delete p.qualification.basisRevision;
+  delete p.qualification.basisDocId;
+}
+
+function projectsUsingDoc(id, openOnly){
+  return projects.filter(p => (!openOnly || !p.completed) && ((projectRegulation(p) || {}).doc || {}).id === id);
+}
+
+// ---- Tasks: statuses and groups ----
+// Statuses: Not Started, In Progress, Waiting (on another party), Complete.
+const TASK_GROUPS = ['Not Started', 'In Progress', 'Waiting', 'Complete'];
+const openTaskGroups = new Set();   // "<page id>|<status>" groups shown open (kept while the page is open)
+
+function taskStatusLabel(status){ return !status || status === 'Pending' ? 'Not Started' : status; }
+function taskStatusClass(status){ return {Complete: 'sage', 'In Progress': 'gold', Waiting: 'plum'}[status] || 'slate'; }
+function taskGroupKey(ctxId, status){ return ctxId + '|' + status; }
+function taskGroupOf(a){ const s = taskStatusLabel(a.status); return TASK_GROUPS.includes(s) ? s : 'Not Started'; }
+function isTaskOverdue(a){ return taskGroupOf(a) !== 'Complete' && !!a.dateDue && daysUntil(a.dateDue) < 0; }
+
+// For completed tasks: how many days after the due date they were completed ('' if on time or unknown).
+function lateNote(a){
+  if(a.status !== 'Complete' || !a.dateDue || !a.dateCompleted) return '';
+  const days = Math.round((new Date(a.dateCompleted + 'T00:00:00') - new Date(a.dateDue + 'T00:00:00')) / 86400000);
+  return days > 0 ? ` <span class="late-note">(${countLabel(days, 'day', 'days')} late)</span>` : '';
+}
+
+// =====================================================================
+// Regulatory Library: stored PDFs (regs/ folder) and certification templates, listed in data/library.json
+// =====================================================================
+let library = {documents: [], templates: [], searchResetAt: '', searchTally: {}};
 let librarySha = null;
 let libraryLoaded = false;
 
@@ -974,7 +922,8 @@ function libraryPath(){
 function normalizeLibrary(raw){
   const lib = raw && typeof raw === 'object' ? raw : {};
   return {
-    documents: Array.isArray(lib.documents) ? lib.documents.filter(d => d && d.id) : [],
+    documents: arr(lib.documents).filter(d => d && d.id),
+    templates: arr(lib.templates).filter(t => t && t.id),
     searchResetAt: lib.searchResetAt || '',
     searchTally: lib.searchTally && typeof lib.searchTally === 'object' ? lib.searchTally : {}
   };
@@ -995,17 +944,14 @@ async function loadLibrary(){
   render();
 }
 
-function libraryDoc(id){ return library.documents.find(d => d.id === id); }
+const libraryDoc = id => library.documents.find(d => d.id === id);
+const libraryTemplate = id => library.templates.find(t => t.id === id);
 
 // ---- Weekly regulatory check (results written to data/reg-status.json by .github/workflows/reg-check.yml) ----
 let regStatus = null;
-const regFlagOpened = new Set();   // {checkedAt, documents: {id: {status, found, checkedAt}}}
 
 function regStatusPath(){ return libraryPath().replace(/library\.json$/, 'reg-status.json'); }
-
-function regCheck(id){
-  return regStatus && regStatus.documents && regStatus.documents[id] || null;
-}
+function regCheck(id){ return regStatus && regStatus.documents && regStatus.documents[id] || null; }
 
 function yourCopy(d){
   return [d.revision, d.asOf ? 'as of ' + fmtDate(d.asOf) : ''].filter(Boolean).join(', ') || 'unknown';
@@ -1027,29 +973,151 @@ function regStatusNote(d){
   const r = regCheck(d.id);
   const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
   if(!r) return '';
-  if(r.status === 'update') return `<div class="reg-note update"><strong>Update available: ${escapeHtml(r.latest || 'newer version')}</strong> (your copy: ${escapeHtml(yourCopy(d))}). ${escapeHtml(r.found || '')}${when ? ` <span class="reg-note-when">Checked ${when}</span>` : ''}</div>`;
-  if(r.status === 'current') return `<div class="reg-note current">Stored copy matches the latest version found.${when ? ` <span class="reg-note-when">Checked ${when}</span>` : ''}</div>`;
+  const w = when ? ` <span class="reg-note-when">Checked ${when}</span>` : '';
+  if(r.status === 'update') return `<div class="reg-note update"><strong>Update available: ${escapeHtml(r.latest || 'newer version')}</strong> (your copy: ${escapeHtml(yourCopy(d))}). ${escapeHtml(r.found || '')}${w}</div>`;
+  if(r.status === 'current') return `<div class="reg-note current">Stored copy matches the latest version found.${w}</div>`;
   if(r.status === 'unmonitored') return EDITOR ? `<div class="reg-note muted-note">Not monitored: no official source page is set for this document. Add one with Edit so the weekly check can watch it.</div>` : '';
   if(r.status === 'error') return EDITOR ? `<div class="reg-note error">The weekly check couldn't read the official source${r.found ? `: ${escapeHtml(r.found)}` : ''}. It will try again next week.</div>` : '';
   return '';
 }
 
 function renderRegUsedBy(d){
-  const list = sortCerts(certsUsingDoc(d.id, false));
+  const list = sortProjects(projectsUsingDoc(d.id, false));
   if(!list.length) return '';
-  const open = list.filter(c => !c.completed), done = list.filter(c => c.completed);
-  const link = c => `<button class="link-inline" type="button" onclick="selectCert('${c.id}')">${escapeHtml(customerKey(c))} (${escapeHtml([c.serial, c.aircraft].filter(Boolean).join(', ') || certName(c))})</button>`;
-  return `<div class="reg-used-by"><span class="fk">Used by</span> ${open.map(link).join(', ') || '<span class="muted">no open certifications</span>'}${done.length ? ` <span class="muted">\u00b7 ${countLabel(done.length, 'completed certification', 'completed certifications')}</span>` : ''}</div>`;
-}
-
-function libraryAuthorities(){
-  return [...new Set(library.documents.map(d => d.authority || 'Other'))].sort(textCmp);
+  const open = list.filter(p => !p.completed), done = list.filter(p => p.completed);
+  const link = p => `<button class="link-inline" type="button" onclick="openProject('${p.id}')">${escapeHtml(customerKey(p))} (${escapeHtml([p.serial, p.aircraft].filter(Boolean).join(', ') || projectName(p))})</button>`;
+  return `<div class="reg-used-by"><span class="fk">Used by</span> ${open.map(link).join(', ') || '<span class="muted">no open projects</span>'}${done.length ? ` <span class="muted">\u00b7 ${countLabel(done.length, 'completed project', 'completed projects')}</span>` : ''}</div>`;
 }
 
 function docTitle(d){ return `${d.authority ? d.authority + ' ' : ''}${d.title}`; }
 
+function libraryAuthorities(){
+  return [...new Set([...library.documents, ...library.templates].map(d => d.authority || 'Other'))].sort(textCmp);
+}
+
+// ---- Templates (3.2): Word templates in Google Drive, per authority and (optionally) level ----
+// A template is copied into the customer's project folder, then the copy is linked on the project.
+function templateLevels(t){ return String(t.levels || '').split(',').map(s => s.trim()).filter(Boolean); }
+
+function templatesFor(p){
+  const auths = [(p.authority || '').trim(), regAuthority(p)].filter(Boolean).map(a => a.toLowerCase());
+  const level = (p.level || '').trim().toLowerCase();
+  return library.templates.filter(t => auths.includes(String(t.authority || '').toLowerCase())
+    && (!templateLevels(t).length || templateLevels(t).some(l => l.toLowerCase() === level)))
+    .sort((a, b) => textCmp(a.title, b.title));
+}
+
+// Google Docs, Sheets and Slides links (Word files opened in Drive included) have a "make a copy" page.
+function driveCopyUrl(url){
+  const m = String(url || '').match(/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([\w-]+)/);
+  return m ? `https://docs.google.com/${m[1]}/d/${m[2]}/copy` : '';
+}
+
+// ---- The Regulatory Library page (3.2: in the main panel; authorities start collapsed) ----
+const LIB_OPEN_KEY = 'cert-tracker-library-open';
+const openAuthorities = new Set();
+const regFlagOpened = new Set();
+try{ JSON.parse(sessionStorage.getItem(LIB_OPEN_KEY) || '[]').forEach(a => openAuthorities.add(a)); }catch(e){}
+
+function toggleAuthority(a){
+  if(openAuthorities.has(a)) openAuthorities.delete(a); else openAuthorities.add(a);
+  render();
+}
+
+function toggleAllAuthorities(){
+  const auths = libraryAuthorities();
+  if(auths.some(a => openAuthorities.has(a))) openAuthorities.clear(); else auths.forEach(a => openAuthorities.add(a));
+  render();
+}
+
+function renderLibraryView(){
+  if(!libraryLoaded) return '<div class="muted">Loading\u2026</div>';
+  // An authority with an update opens once, so the flag can't hide in a collapsed group.
+  library.documents.forEach(d => {
+    if((regCheck(d.id) || {}).status === 'update' && !regFlagOpened.has(d.id)){ openAuthorities.add(d.authority || 'Other'); regFlagOpened.add(d.id); }
+  });
+  const auths = libraryAuthorities();
+  const when = regStatus && regStatus.checkedAt ? fmtDate(String(regStatus.checkedAt).slice(0, 10)) : '';
+  const anyOpen = auths.some(a => openAuthorities.has(a));
+  const groups = auths.map(auth => {
+    const docs = library.documents.filter(d => (d.authority || 'Other') === auth).sort((a, b) => textCmp(a.title, b.title));
+    const temps = library.templates.filter(t => (t.authority || 'Other') === auth).sort((a, b) => textCmp(a.title, b.title));
+    const ups = docs.filter(d => (regCheck(d.id) || {}).status === 'update').length;
+    const open = openAuthorities.has(auth);
+    const docRows = docs.map(d => {
+      const n = projectsUsingDoc(d.id, true).length;
+      return rowButton({type: 'reg', id: d.id, page: 1}, `${ICON.file}<b class="row-strong">${escapeHtml(d.title)}</b> <span class="row-sub">${escapeHtml(d.revision || '')}${d.fullTitle ? ' \u00b7 ' + escapeHtml(d.fullTitle) : ''}</span>${regBadge(d.id)}`,
+        n ? countLabel(n, 'open project', 'open projects') : '');
+    }).join('');
+    const tempRows = temps.map(t => `
+      <div class="lib-template">
+        <span class="lib-template-main">${ICON.copy}<b class="row-strong">${escapeHtml(t.title)}</b> <span class="row-sub">${templateLevels(t).length ? escapeHtml(templateLevels(t).join(', ')) : 'All levels'}${t.notes ? ' \u00b7 ' + escapeHtml(t.notes) : ''}</span></span>
+        <span class="cert-actions">
+          ${t.url ? `<a class="btn-text compact" href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" title="Open in Drive">${ICON.external}<span class="btn-label">Open</span></a>` : ''}
+          ${EDITOR ? actionBtn('edit', 'Edit', `openTemplateModal('${t.id}')`) + actionBtn('trash', 'Delete', `deleteTemplate('${t.id}')`, {cls: 'danger'}) : ''}
+        </span>
+      </div>`).join('');
+    return `
+      <div class="lib-group">
+        <button class="lib-auth" type="button" aria-expanded="${open}" onclick="toggleAuthority('${escapeAttr(auth)}')">${ICON.chevron}<span class="lib-auth-name">${escapeHtml(auth)}</span><span class="row-sub">${countLabel(docs.length, 'document', 'documents')}${temps.length ? ' \u00b7 ' + countLabel(temps.length, 'template', 'templates') : ''}</span>${ups ? `<span class="reg-flag update">${countLabel(ups, 'update', 'updates')}</span>` : ''}</button>
+        ${open ? `<div class="lib-body">
+          ${docs.length ? `<div class="lib-sub">Regulations</div><div class="lib-rows">${docRows}</div>` : ''}
+          ${temps.length ? `<div class="lib-sub">Templates</div><div class="lib-rows">${tempRows}</div>` : ''}
+        </div>` : ''}
+      </div>`;
+  }).join('');
+  return `
+    <div class="detail-head">
+      <div>
+        <h2 class="detail-title">Regulatory Library <span class="title-count">(${library.documents.length})</span></h2>
+        <div class="doc-meta">${countLabel(library.documents.length, 'regulation', 'regulations')} \u00b7 ${countLabel(library.templates.length, 'certification template', 'certification templates')}${when ? ` \u00b7 checked for updates ${when}` : ''}</div>
+      </div>
+    </div>
+    <div class="detail-actions doc-actions">
+      ${auths.length ? `<button class="act-toggle-all" type="button" onclick="toggleAllAuthorities()">${anyOpen ? ICON.collapseAll : ICON.expandAll}<span>${anyOpen ? 'Collapse all' : 'Expand all'}</span></button>` : ''}
+      ${EDITOR ? actionBtn('plus', 'Add regulation', 'openLibraryModal()', {compact: false}) + actionBtn('plus', 'Add template', 'openTemplateModal()', {compact: false}) : ''}
+    </div>
+    <div class="lib-groups">${groups || `<div class="muted list-empty">No documents yet.</div>`}</div>
+    <div class="muted search-note">Regulations are stored copies, checked weekly against their official sources. Templates are Word files in Google Drive: copy one into the customer's project folder, then link the copy on the project (Documents \u2192 From template).</div>`;
+}
+
+function openDoc(id, page){ navigate({type: 'reg', id, page: page || 1}); }
+
+function renderRegView(){
+  const d = libraryDoc(view.id);
+  if(!d) return libraryLoaded ? renderLibraryView() : '<div class="muted">Loading\u2026</div>';
+  const page = view.page || 1;
+  const url = pdfPageUrl('regs/' + d.file, page);
+  const meta = [d.revision, d.asOf ? 'Copy as of ' + fmtDate(d.asOf) : '', d.pages ? countLabel(d.pages, 'page', 'pages') : ''].filter(Boolean).join(' \u00b7 ');
+  return `
+    ${navFrom ? backLinkHtml() : backBtn('Regulatory Library', 'openLibrary()')}
+    <div class="detail-context">Regulatory Library / ${escapeHtml(d.authority || 'Other')}</div>
+    <div class="detail-head">
+      <div>
+        <h2 class="detail-title">${escapeHtml(docTitle(d))}</h2>
+        ${d.fullTitle ? `<div class="doc-full-title">${escapeHtml(d.fullTitle)}</div>` : ''}
+        ${meta ? `<div class="doc-meta">${escapeHtml(meta)}</div>` : ''}
+      </div>
+    </div>
+    <div class="detail-actions doc-actions">
+      <a class="btn-text pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>
+      ${d.officialUrl ? `<a class="btn-text" href="${escapeHtml(d.officialUrl)}" target="_blank" rel="noopener noreferrer">${ICON.globe}<span>Official source</span></a>` : ''}
+      ${EDITOR ? `
+        ${actionBtn('edit', 'Edit', `openLibraryModal('${d.id}')`)}
+        ${actionBtn('search', 'Rebuild search index', `rebuildIndex('${d.id}')`, {compact: false})}
+        ${actionBtn('trash', 'Delete', `deleteLibraryDoc('${d.id}')`, {cls: 'danger'})}` : ''}
+    </div>
+    ${regStatusNote(d)}
+    ${renderRegUsedBy(d)}
+    ${EDITOR && !d.indexed ? `<div class="doc-note">This document isn't in the search index yet. Once its PDF is in the data repo's regs/ folder, click Rebuild search index.</div>` : ''}
+    ${url ? '' : `<div class="reg-loading" id="pdf-loading">Loading the document&hellip;</div>`}
+    ${isPhone()
+      ? `<a class="btn-primary open-doc-btn pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open document</span></a>`
+      : `<iframe class="pdf-frame" id="pdf-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(docTitle(d))}"></iframe>`}`;
+}
+
 // PDFs are in the private data repo, so they are fetched with the key and shown from a local copy.
-// Shared by the regulatory library and the ATD documents (3.1.1); kept for the visit, keyed by repo path.
+// Shared by the Regulatory Library and the ATD documents; kept for the visit, keyed by repo path.
 const pdfBlobs = {};       // path -> blob URL, or '' when it couldn't be loaded
 const pdfLoading = {};
 
@@ -1125,95 +1193,8 @@ function searchPages(index, t){
   return {hits, matches};
 }
 
-// The library starts collapsed. An authority with an update opens once, so the flag can't hide
-// in a collapsed group.
-function prepareLibraryExpansion(){
-  if(!library.documents.length) return;
-  libraryExpandInit = true;
-  library.documents.forEach(d => {
-    if((regCheck(d.id) || {}).status === 'update' && !regFlagOpened.has(d.id)){ expandedAuthorities.add(d.authority || 'Other'); regFlagOpened.add(d.id); }
-  });
-}
-
-function renderLibraryList(){
-  if(!library.documents.length){
-    return `<div class="side-empty">${libraryLoaded ? 'No documents yet' : 'Loading\u2026'}</div>`;
-  }
-  const auths = libraryAuthorities();
-  return auths.map(auth => {
-    const open = expandedAuthorities.has(auth);
-    const docs = library.documents.filter(d => (d.authority || 'Other') === auth).sort((a, b) => textCmp(a.title, b.title));
-    return `
-      <div class="side-customer">
-        <button class="side-customer-btn" aria-expanded="${open}" onclick="toggleAuthority('${escapeAttr(auth)}')">
-          <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
-          <span class="side-customer-name">${escapeHtml(auth)}</span>
-          <span class="tab-count zero">${docs.length}</span>
-        </button>
-        ${open ? `<div class="side-certs">${docs.map(d => {
-          const active = view.type === 'reg' && view.id === d.id;
-          return `
-          <button class="side-cert side-doc ${active ? 'active' : ''}" ${active ? 'aria-current="true"' : ''} onclick="openDoc('${d.id}')">
-            ${ICON.file}
-            <span class="side-cert-name">${escapeHtml(d.title)}${d.revision ? `<span class="side-cert-auth">${escapeHtml(d.revision)}</span>` : ''}${regBadge(d.id)}</span>
-          </button>`;
-        }).join('')}</div>` : ''}
-      </div>`;
-  }).join('');
-}
-
-function toggleAuthority(a){
-  if(expandedAuthorities.has(a)) expandedAuthorities.delete(a);
-  else expandedAuthorities.add(a);
-  render();
-}
-
-function toggleAllAuthorities(){
-  const auths = libraryAuthorities();
-  if(auths.some(a => expandedAuthorities.has(a))) expandedAuthorities.clear();
-  else auths.forEach(a => expandedAuthorities.add(a));
-  render();
-}
-
-function openDoc(id, page){ navigate({type: 'reg', id, page: page || 1}); }
-
-const isPhone = () => window.matchMedia('(max-width: 760px)').matches;
-
-function renderRegView(){
-  const d = libraryDoc(view.id);
-  if(!d) return libraryLoaded ? renderHome() : '<div class="muted">Loading\u2026</div>';
-  const page = view.page || 1;
-  const url = pdfPageUrl('regs/' + d.file, page);
-  const meta = [d.revision, d.asOf ? 'Copy as of ' + fmtDate(d.asOf) : '', d.pages ? countLabel(d.pages, 'page', 'pages') : ''].filter(Boolean).join(' \u00b7 ');
-  return `
-    ${backLinkHtml()}
-    <div class="detail-context">Regulatory library / ${escapeHtml(d.authority || 'Other')}</div>
-    <div class="detail-head">
-      <div>
-        <h2 class="detail-title">${escapeHtml(docTitle(d))}</h2>
-        ${d.fullTitle ? `<div class="doc-full-title">${escapeHtml(d.fullTitle)}</div>` : ''}
-        ${meta ? `<div class="doc-meta">${escapeHtml(meta)}</div>` : ''}
-      </div>
-    </div>
-    <div class="detail-actions doc-actions">
-      <a class="btn-text pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" ${url ? '' : 'aria-disabled="true"'} target="_blank" rel="noopener">${ICON.external}<span>Open in new tab</span></a>
-      ${d.officialUrl ? `<a class="btn-text" href="${escapeHtml(d.officialUrl)}" target="_blank" rel="noopener noreferrer">${ICON.globe}<span>Official source</span></a>` : ''}
-      ${EDITOR ? `
-        ${actionBtn('edit', 'Edit', `openLibraryModal('${d.id}')`)}
-        ${actionBtn('search', 'Rebuild search index', `rebuildIndex('${d.id}')`, {compact: false})}
-        ${actionBtn('trash', 'Delete', `deleteLibraryDoc('${d.id}')`, {cls: 'danger'})}` : ''}
-    </div>
-    ${regStatusNote(d)}
-    ${renderRegUsedBy(d)}
-    ${EDITOR && !d.indexed ? `<div class="doc-note">This document isn't in the search index yet. Once its PDF is in the data repo's regs/ folder, click Rebuild search index.</div>` : ''}
-    ${url ? '' : `<div class="reg-loading" id="pdf-loading">Loading the document&hellip;</div>`}
-    ${isPhone()
-      ? `<a class="btn-primary open-doc-btn pdf-open-link ${url ? '' : 'disabled'}" href="${url || '#'}" target="_blank" rel="noopener">${ICON.file}<span>Open document</span></a>`
-      : `<iframe class="pdf-frame" id="pdf-frame" ${url ? `src="${url}" data-src="${url}"` : 'hidden'} title="${escapeHtml(docTitle(d))}"></iframe>`}`;
-}
-
 // =====================================================================
-// Search: certifications, activities, comments and the regulatory library
+// Search: projects, tasks, comments, the Regulatory Library and ATD documents
 // =====================================================================
 let regIndexLoading = null;
 const expandedRegResults = new Set();
@@ -1244,20 +1225,19 @@ function syncSearchInput(){
   if(input && view.type === 'search' && document.activeElement !== input) input.value = view.q;
 }
 
-function searchCerts(t){
-  return sortListItems('cert', certs.filter(c =>
-    [customerKey(c), c.serial, c.authority, c.level, c.aircraft, certName(c), certModel(c), c.country,
-     ...(Array.isArray(c.docs) ? c.docs.map(d => d.name) : [])]
-      .some(v => textHas(v, t))));
+function searchProjects(t){
+  return sortListItems('project', projects.filter(p =>
+    [customerKey(p), p.serial, p.authority, p.level, p.aircraft, projectName(p), simModel(p), p.country,
+     ...scopedList(p, 'docs').map(x => x.item.name)].some(v => textHas(v, t))));
 }
 
-function searchActivities(t){
+function searchTasks(t){
   const out = [];
-  allActivities().forEach(x => {
-    if(textHas(x.a.description, t)) out.push({...x, kind: 'act'});
-    (x.a.comments || []).forEach(cm => { if(textHas(cm.text, t)) out.push({...x, cm, kind: 'comment'}); });
+  allTasks().forEach(x => {
+    if(textHas(x.a.description, t)) out.push({...x, kind: 'task'});
+    arr(x.a.comments).forEach(cm => { if(textHas(cm.text, t)) out.push({...x, cm, kind: 'comment'}); });
   });
-  return out.sort((x, y) => certSortCmp(x.c, y.c) || dateCmp(actDate(x.a), actDate(y.a)));
+  return out.sort((x, y) => ownerSortCmp(x.c, y.c) || dateCmp(taskDate(x.a), taskDate(y.a)));
 }
 
 // Loads the page texts for every indexed document (regs/index/<id>.json), once per visit.
@@ -1298,43 +1278,41 @@ let searchSeq = 0;
 let recordedSeq = -1;
 
 function renderSearchView(){
-  rowActions = [];
   const q = view.q;
   const t = q.toLowerCase();
   const from = {type: 'search', q, tab: view.tab};
-  const certHits = searchCerts(t);
-  const actHits = searchActivities(t);
+  const projHits = searchProjects(t);
+  const taskHits = searchTasks(t);
   const ready = regSearchReady();
   const regHits = ready ? searchRegs(t) : [];
   const regPages = regHits.reduce((n, r) => n + r.hits.length, 0);
   const atdReady = atdSearchReady();
   const atdHits = atdReady ? searchAtd(t) : {devices: [], docs: [], count: 0};
-  const total = certHits.length + actHits.length + regPages + atdHits.count;
+  const total = projHits.length + taskHits.length + regPages + atdHits.count;
   if(ready && atdReady && total > 0 && recordedSeq !== searchSeq){ recordedSeq = searchSeq; recordSearch(q); }
 
   const tab = view.tab || 'all';
   const all = tab === 'all';
-  const tabs = [['all', 'All', ready ? total : null], ['certs', 'Certifications', certHits.length], ['acts', 'Tasks', actHits.length], ['regs', 'Regulations', ready ? regPages : null]];
-  if(atd.devices.length) tabs.push(['atd', 'ATD devices', atdReady ? atdHits.count : null]);
-  if(!atdReady) tabs[0][2] = null;
+  const tabs = [['all', 'All', ready && atdReady ? total : null], ['projects', 'Projects', projHits.length], ['tasks', 'Tasks', taskHits.length], ['regs', 'Regulations', ready ? regPages : null]];
+  if(atd.devices.length) tabs.push(['atd', 'ATD Approvals', atdReady ? atdHits.count : null]);
   const groupHead = (key, label, count) => `<div class="result-group"><b>${label} <span class="title-count">(${count})</span></b>${all && count > 3 ? `<button class="side-tool" type="button" onclick="setSearchTab('${key}')">Show all</button>` : ''}</div>`;
 
   let body = '';
-  if(all || tab === 'certs'){
-    if(certHits.length) body += groupHead('certs', 'Certifications', certHits.length) + certHits.slice(0, all ? 3 : undefined).map(c =>
-      rowButton({type: 'cert', id: c.id, from}, `<b class="row-strong">${highlight(customerKey(c), q)}</b> <span class="row-sub">\u00b7 SN: ${highlight(c.serial || '\u2014', q)} \u00b7 ${highlight([c.authority, c.level].filter(Boolean).join(' '), q)}${c.aircraft ? ' \u00b7 ' + highlight(c.aircraft, q) : ''}</span>`, dueText(c.date, c.completed ? c.dateCompleted : '', isOverdue(c)))).join('');
+  if((all || tab === 'projects') && projHits.length){
+    body += groupHead('projects', 'Projects', projHits.length) + projHits.slice(0, all ? 3 : undefined).map(p =>
+      rowButton({type: 'project', id: p.id, from}, `<b class="row-strong">${highlight(customerKey(p), q)}</b> <span class="row-sub">\u00b7 SN: ${highlight(p.serial || '\u2014', q)} \u00b7 ${highlight([p.authority, p.level].filter(Boolean).join(' '), q)}${p.aircraft ? ' \u00b7 ' + highlight(p.aircraft, q) : ''}</span>`, dueText(p.date, p.completed ? p.dateCompleted : '', isProjectLate(p)))).join('');
   }
-  if(all || tab === 'acts'){
-    if(actHits.length) body += groupHead('acts', 'Tasks and comments', actHits.length) + actHits.slice(0, all ? 3 : undefined).map(x => {
-      const status = activityStatusLabel(x.a.status);
+  if((all || tab === 'tasks') && taskHits.length){
+    body += groupHead('tasks', 'Tasks and comments', taskHits.length) + taskHits.slice(0, all ? 3 : undefined).map(x => {
+      const status = taskStatusLabel(x.a.status);
       const text = x.kind === 'comment' ? x.cm.text : x.a.description;
-      return rowButton({type: 'act', certId: x.c.id, activityId: x.a.id, comment: x.kind === 'comment', from},
-        `<span class="row-sub">${escapeHtml(customerKey(x.c))} \u00b7 SN: ${escapeHtml(x.c.serial || '\u2014')}</span><br><span class="pill pill-${activityStatusClass(status)}">${escapeHtml(status)}</span>${x.kind === 'comment' ? ICON.comment : ''}${highlight(plainSnippet(text, 200), q)}`,
+      return rowButton({type: 'task', ownerId: x.owner.id, taskId: x.a.id, comment: x.kind === 'comment', from},
+        `<span class="row-sub">${escapeHtml(customerKey(x.c))} \u00b7 SN: ${escapeHtml(x.c.serial || '\u2014')}</span><br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${x.kind === 'comment' ? ICON.comment : ''}${highlight(plainSnippet(text, 200), q)}`,
         x.kind === 'comment' ? 'Comment' : 'Task');
     }).join('');
   }
   if(all || tab === 'regs'){
-    if(!ready) body += `<div class="result-group"><b>Regulations</b></div><div class="muted list-empty">Searching the regulatory library\u2026</div>`;
+    if(!ready) body += `<div class="result-group"><b>Regulations</b></div><div class="muted list-empty">Searching the Regulatory Library\u2026</div>`;
     else if(regHits.length){
       body += groupHead('regs', 'Regulations', regPages) + regHits.slice(0, all ? 3 : undefined).map(r => {
         const expanded = expandedRegResults.has(r.doc.id);
@@ -1362,8 +1340,7 @@ function renderSearchView(){
 function setSearchTab(tab){ view = {...view, tab}; render(); }
 
 function toggleRegResults(id){
-  if(expandedRegResults.has(id)) expandedRegResults.delete(id);
-  else expandedRegResults.add(id);
+  if(expandedRegResults.has(id)) expandedRegResults.delete(id); else expandedRegResults.add(id);
   render();
 }
 
@@ -1405,9 +1382,8 @@ function recordSearch(q){
 
 // Frequent searches, with older ones fading (a search counts half as much after 30 days).
 function topSearches(){
-  const h = loadSearchHistory();
   const now = Date.now();
-  return Object.values(h.terms)
+  return Object.values(loadSearchHistory().terms)
     .map(t => ({...t, score: t.n * Math.pow(0.5, (now - (t.last || now)) / (30 * 86400000))}))
     .sort((a, b) => b.score - a.score || b.last - a.last)
     .slice(0, 3);
@@ -1436,8 +1412,7 @@ function hideSuggestions(){
 }
 
 function pickSuggestion(i){
-  const box = document.getElementById('search-suggest');
-  const terms = JSON.parse(box.dataset.terms || '[]');
+  const terms = JSON.parse(document.getElementById('search-suggest').dataset.terms || '[]');
   if(!terms[i]) return;
   const input = document.getElementById('search-input');
   input.value = terms[i];
@@ -1455,7 +1430,7 @@ function moveSuggestion(d){
   return true;
 }
 
-// Header controls shared by both pages: search box (press / to jump there) and the summary bar.
+// Header search box (press / to jump there).
 function initHeader(){
   const input = document.getElementById('search-input');
   if(!input) return;
@@ -1486,16 +1461,57 @@ function initHeader(){
 }
 
 // =====================================================================
-// Shared helpers
+// GitHub reads
 // =====================================================================
-
 function loadSettings(){
-  try{
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  }catch(e){
-    return null;
+  try{ const raw = localStorage.getItem(SETTINGS_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+
+function ghHeaders(){
+  const headers = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'};
+  if(ghConfig && ghConfig.token) headers['Authorization'] = 'Bearer ' + ghConfig.token;
+  return headers;
+}
+
+function ghRepoUrl(rest){ return `https://api.github.com/repos/${ghConfig.owner}/${ghConfig.repo}/${rest}`; }
+function ghApiUrl(path){ return ghRepoUrl('contents/' + encodeURIComponent(path).replace(/%2F/g, '/')); }
+
+function b64DecodeUtf8(b64){ return decodeURIComponent(escape(atob(b64))); }
+
+// Reads a JSON file from the repo: {data, sha}, or null if the file doesn't exist yet.
+// ref: a branch (default) or a commit, for older versions.
+async function ghReadJson(path, ref){
+  // no-cache: always check GitHub for a newer copy (unchanged files come back as a quick 304).
+  const res = await fetch(ghApiUrl(path) + `?ref=${encodeURIComponent(ref || ghConfig.branch)}`, {headers: ghHeaders(), cache: 'no-cache'});
+  if(res.status === 404) return null;
+  if(!res.ok){
+    const err = new Error(`GitHub read failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
   }
+  const json = await res.json();
+  return {data: JSON.parse(b64DecodeUtf8(json.content.replace(/\n/g, ''))), sha: json.sha};
+}
+
+// The data file as saved (any format), or null if there isn't one yet.
+async function fetchFromGitHub(){
+  lastFetchAt = Date.now();
+  const res = await ghReadJson(ghConfig.path);
+  if(!res) return null;
+  currentSha = res.sha;
+  return res.data;
+}
+
+// Raw file from the data repo (works for files over 1 MB, up to 100 MB).
+async function ghRaw(path){
+  const res = await fetch(ghApiUrl(path) + `?ref=${encodeURIComponent(ghConfig.branch)}`,
+    {headers: {...ghHeaders(), 'Accept': 'application/vnd.github.raw'}, cache: 'no-cache'});
+  if(!res.ok){
+    const err = new Error(`GitHub read failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return res;
 }
 
 function showBanner(kind, html){
@@ -1505,12 +1521,103 @@ function showBanner(kind, html){
   el.style.display = 'block';
 }
 
-function hideBanner(){
-  document.getElementById('sync-banner').style.display = 'none';
+function hideBanner(){ document.getElementById('sync-banner').style.display = 'none'; }
+
+// =====================================================================
+// Shared helpers
+// =====================================================================
+function countLabel(n, one, many){ return `${n} ${n === 1 ? one : many}`; }
+
+function localToday(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function b64DecodeUtf8(b64){
-  return decodeURIComponent(escape(atob(b64)));
+function isoAddDays(iso, n){
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function daysUntil(iso){
+  if(!iso) return null;
+  return Math.round((new Date(iso + 'T00:00:00') - new Date(localToday() + 'T00:00:00')) / 86400000);
+}
+
+function dateWithin(iso, days){ const n = daysUntil(iso); return n !== null && n >= 0 && n <= days; }
+
+function fmtDate(d){
+  if(!d) return '\u2014';
+  return new Date(d + 'T00:00:00').toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+// "9:05 AM" -> "09:05" so times sort correctly; unknown formats sort first.
+function to24(t){
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})\s*([AP]M)?$/i);
+  if(!m) return '';
+  let h = Number(m[1]);
+  if(m[3]) h = (h % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return String(h).padStart(2, '0') + ':' + m[2];
+}
+
+// ---- Contact details ----
+// Older data kept name and email together ("Name - name@example.com"); the converter splits them.
+const EMAIL_RE = /[^\s<>(),;:]+@[^\s<>(),;:]+\.[A-Za-z]{2,}/;
+
+function splitContact(text){
+  const t = String(text || '').trim();
+  const m = t.match(EMAIL_RE);
+  if(!m) return {name: t, email: ''};
+  const name = t.replace(m[0], ' ').replace(/[<>()]/g, ' ')
+    .replace(/\s*[-\u2013\u2014,;:|]\s*$/, '').replace(/^\s*[-\u2013\u2014,;:|]\s*/, '')
+    .replace(/\s{2,}/g, ' ').trim();
+  return {name, email: m[0]};
+}
+
+// View-only page shows SIM location as city, state and country only.
+// "2825 Airport Drive, Vero Beach, FL 32960, USA" -> "Vero Beach, FL, USA".
+// Entries without a street number ("Greece", "RBHQ") are shown as entered;
+// any other full address shows just its country (the last part).
+function publicLocation(loc){
+  const s = String(loc || '').trim();
+  if(!s || !/\d/.test(s)) return s;
+  const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+  const si = parts.findIndex(x => /^[A-Z]{2}\s+\d{5}(-\d{4})?$/.test(x));
+  if(si > 0) return `${parts[si - 1]}, ${parts[si].slice(0, 2)}, ${parts.slice(si + 1).join(', ') || 'USA'}`;
+  const last = parts[parts.length - 1];
+  return /\d/.test(last) ? '' : last;
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+function escapeAttr(s){ return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+// Shows typed text as written: line breaks are kept, and lines starting with "- ", "* " or "•"
+// become a bulleted list. Text is escaped first, so nothing typed or pasted can change the page.
+function formatText(s){
+  const out = [];
+  let list = null;
+  String(s == null ? '' : s).replace(/\r\n?/g, '\n').split('\n').forEach(line => {
+    const m = line.match(/^\s*(?:[-*]\s+|\u2022\s*)(.*)$/);
+    if(m){ (list = list || []).push(escapeHtml(m[1])); return; }
+    if(list){ out.push({list}); list = null; }
+    out.push({line: escapeHtml(line)});
+  });
+  if(list) out.push({list});
+  return out.map((part, i) => part.list
+    ? '<ul class="text-list">' + part.list.map(li => `<li>${li}</li>`).join('') + '</ul>'
+    : (i > 0 && !out[i - 1].list ? '<br>' : '') + part.line).join('');
+}
+
+// Small outlined action button. compact = icon-only on phones (label kept as tooltip).
+function actionBtn(kind, label, onclick, opts){
+  const o = opts || {};
+  const cls = ['btn-text', o.cls || '', o.compact === false ? '' : 'compact'].join(' ').trim();
+  return `<button class="${cls}" type="button" onclick="${onclick}" title="${label}" aria-label="${label}">${ICON[kind]}<span class="btn-label">${label}</span></button>`;
 }
 
 // ---- Icons ----
@@ -1533,9 +1640,8 @@ const ICON = {
   home: svgIcon('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>'),
   arrowLeft: svgIcon('<path d="M19 12H5M12 19l-7-7 7-7"/>'),
   arrowRight: svgIcon('<path d="M5 12h14M12 5l7 7-7 7"/>'),
-  grip: svgIcon('<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>'),
-  sliders: svgIcon('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
   file: svgIcon('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>'),
+  copy: svgIcon('<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h2"/>'),
   external: svgIcon('<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
   globe: svgIcon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
   search: svgIcon('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
@@ -1543,449 +1649,9 @@ const ICON = {
   history: svgIcon('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5M12 8v4l3 2"/>'),
   device: svgIcon('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
   bell: svgIcon('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>'),
-  upload: svgIcon('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>')
+  upload: svgIcon('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
+  download: svgIcon('<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>')
 };
-
-// ---- GitHub ----
-// The view-only page reads without a token; the editor reads and writes with the saved token.
-function ghHeaders(){
-  const headers = {'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'};
-  if(ghConfig && ghConfig.token) headers['Authorization'] = 'Bearer ' + ghConfig.token;
-  return headers;
-}
-
-function ghApiUrl(path){
-  return `https://api.github.com/repos/${ghConfig.owner}/${ghConfig.repo}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}`;
-}
-
-// Reads a JSON file from the repo: {data, sha}, or null if the file doesn't exist yet.
-async function ghReadJson(path){
-  // no-cache: always check GitHub for a newer copy (unchanged files come back as a quick 304).
-  const res = await fetch(ghApiUrl(path) + `?ref=${encodeURIComponent(ghConfig.branch)}`, {headers: ghHeaders(), cache: 'no-cache'});
-  if(res.status === 404) return null;
-  if(!res.ok){
-    const body = await res.text();
-    const err = new Error(`GitHub read failed (${res.status}): ${body.slice(0, 200)}`);
-    err.status = res.status;
-    throw err;
-  }
-  const json = await res.json();
-  return {data: JSON.parse(b64DecodeUtf8(json.content.replace(/\n/g, ''))), sha: json.sha};
-}
-
-async function fetchFromGitHub(){
-  lastFetchAt = Date.now();
-  const res = await ghReadJson(ghConfig.path);
-  if(!res) return null;
-  currentSha = res.sha;
-  return unwrapCerts(res.data);
-}
-
-// v3 files are {schemaVersion, certifications}; a v2 file (a bare list) still reads.
-function unwrapCerts(data){
-  if(Array.isArray(data)) return data;
-  return data && Array.isArray(data.certifications) ? data.certifications : [];
-}
-
-function wrapCerts(list){
-  return {schemaVersion: SCHEMA_VERSION, certifications: list};
-}
-
-// Raw file from the data repo (works for files over 1 MB, up to 100 MB).
-async function ghRaw(path){
-  const res = await fetch(ghApiUrl(path) + `?ref=${encodeURIComponent(ghConfig.branch)}`,
-    {headers: {...ghHeaders(), 'Accept': 'application/vnd.github.raw'}, cache: 'no-cache'});
-  if(!res.ok){
-    const err = new Error(`GitHub read failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return res;
-}
-
-function isOverdue(c){
-  if(c.completed || !c.date) return false;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const d = new Date(c.date + 'T00:00:00');
-  return d < today;
-}
-
-function fmtDate(d){
-  if(!d) return '\u2014';
-  const dt = new Date(d + 'T00:00:00');
-  return dt.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
-}
-
-function isCertOverdue(c){
-  if(c.completed) return false;
-  if(isOverdue(c)) return true;
-  const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
-  return acts.some(isActivityOverdue);
-}
-
-function computeCertStatus(c){
-  if(c.completed) return {label: 'Completed', cls: 'sage'};
-  if(isCertOverdue(c)) return {label: 'Overdue', cls: 'overdue'};
-  const acts = Array.isArray(c.activityLog) ? c.activityLog : [];
-  if(acts.length === 0) return {label: 'No Tasks', cls: 'slate'};
-  const anyOpen = acts.some(a => a.status !== 'Complete');
-  if(anyOpen) return {label: 'In Progress', cls: 'gold'};
-  return {label: 'On Track', cls: 'sage'};
-}
-
-function sortCerts(items){
-  return [...items].sort((a,b) => {
-    const aDone = a.completed ? 1 : 0;
-    const bDone = b.completed ? 1 : 0;
-    if(aDone !== bDone) return aDone - bDone;
-    const aOver = isCertOverdue(a) ? 0 : 1;
-    const bOver = isCertOverdue(b) ? 0 : 1;
-    if(aOver !== bOver) return aOver - bOver;
-    const ad = a.date || '9999-99-99';
-    const bd = b.date || '9999-99-99';
-    return ad.localeCompare(bd);
-  });
-}
-
-function groupBySerial(items){
-  const groups = {};
-  const order = [];
-  items.forEach(c => {
-    const key = c.serial || 'No serial number';
-    if(!groups[key]){ groups[key] = []; order.push(key); }
-    groups[key].push(c);
-  });
-  return { groups, order };
-}
-
-// Small outlined action button. compact = icon-only on phones (label kept as tooltip).
-function actionBtn(kind, label, onclick, opts){
-  const o = opts || {};
-  const cls = ['btn-text', o.cls || '', o.compact === false ? '' : 'compact'].join(' ').trim();
-  return `<button class="${cls}" onclick="${onclick}" title="${label}" aria-label="${label}">${ICON[kind]}<span class="btn-label" data-label="${label}">${label}</span></button>`;
-}
-
-// "View" button: opens a document's link in a new tab (only for documents that have a link).
-function viewBtn(doc){
-  const url = typeof doc === 'string' ? '' : (doc.url || '');
-  if(!url) return '';
-  return `<a class="btn-text compact" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="View" aria-label="View">${ICON.eye}<span class="btn-label">View</span></a>`;
-}
-
-// ---- Google Drive preview ----
-// Turns a Drive or Google Docs share link into its embeddable preview address ('' if it isn't one).
-function drivePreviewUrl(url){
-  const u = String(url || '');
-  let m = u.match(/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([\w-]+)/);
-  if(m) return `https://docs.google.com/${m[1]}/d/${m[2]}/preview`;
-  m = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/) || u.match(/drive\.google\.com\/(?:open|uc)\?(?:[^#]*&)?id=([\w-]+)/);
-  if(m) return `https://drive.google.com/file/d/${m[1]}/preview`;
-  return '';
-}
-
-function findCertDoc(certId, docId){
-  const c = certs.find(x => x.id === certId);
-  return c && Array.isArray(c.docs) ? c.docs.find(d => d && d.id === docId) || null : null;
-}
-
-function previewBtn(c, doc){
-  if(typeof doc === 'string' || !doc.id || !drivePreviewUrl(doc.url)) return '';
-  return `<button class="btn-text compact" type="button" title="Preview" aria-label="Preview" onclick="openDrivePreview('${c.id}', '${doc.id}')">${ICON.file}<span class="btn-label">Preview</span></button>`;
-}
-
-function openDrivePreview(certId, docId){ navigate({type: 'doc', cert: certId, doc: docId}); }
-
-function renderDrivePreview(c){
-  const d = findCertDoc(c.id, view.doc);
-  if(!d) return renderCertDetail(c);
-  const src = drivePreviewUrl(d.url);
-  return `
-    <button class="back-link" type="button" onclick="selectCert('${c.id}')">${ICON.arrowLeft}<span>Back to ${escapeHtml(customerKey(c))}${c.serial ? ' / SN ' + escapeHtml(c.serial) : ''}</span></button>
-    <div class="detail-context">${escapeHtml(customerKey(c))}${c.serial ? ' / ' + escapeHtml(c.serial) : ''} / Documents</div>
-    <div class="detail-head"><div><h2 class="detail-title">${escapeHtml(d.name || 'Document')}</h2></div></div>
-    <div class="detail-actions doc-actions">
-      <a class="btn-text" href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer">${ICON.external}<span>Open in Drive</span></a>
-    </div>
-    ${isPhone()
-      ? `<a class="btn-primary open-doc-btn" href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer">${ICON.file}<span>Open document</span></a>`
-      : `<iframe class="pdf-frame" src="${escapeHtml(src)}" title="${escapeHtml(d.name || 'Document preview')}" allow="autoplay"></iframe>
-         <p class="drive-access-note">Can't see the document? You need access to this file in Google Drive. Sign in with an account that has access, or ask the file's owner to share it.</p>`}`;
-}
-
-// ---- Automatic certification name and SIM model ----
-// SIM model is read from the serial: skip a leading "R-" prefix, take the letters before the digits
-// (R-MCX-100251 -> MCX, FMX-0297 -> FMX). A typed model overrides it.
-function detectModel(serial){
-  const m = String(serial || '').trim().toUpperCase().match(/^(?:R-)?([A-Z]+)(?=[-\s]?\d)/);
-  return m ? m[1] : '';
-}
-
-function certModel(c){
-  return (c.simModel || '').trim() || detectModel(c.serial);
-}
-
-// "Authority Level - Aircraft (Model)", e.g. "UKCAA FNPT II - Piper PA-28-181 Archer (MCX)"
-function autoName(c){
-  let n = [c.authority, c.level].map(x => (x || '').trim()).filter(Boolean).join(' ');
-  const aircraft = (c.aircraft || '').trim();
-  if(aircraft) n = n ? `${n} - ${aircraft}` : aircraft;
-  const model = certModel(c);
-  if(model) n = n ? `${n} (${model})` : model;
-  return n;
-}
-
-// Existing certifications (no nameAuto flag) keep their typed names as overrides.
-function certName(c){
-  if(c.nameAuto) return autoName(c) || c.name || 'Untitled certification';
-  return c.name || autoName(c) || 'Untitled certification';
-}
-
-// ---- Completed certifications ----
-function localToday(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// ---- Contact details ----
-// Older data keeps name and email together in primaryContact ("Name - name@example.com").
-const EMAIL_RE = /[^\s<>(),;:]+@[^\s<>(),;:]+\.[A-Za-z]{2,}/;
-
-function splitContact(text){
-  const t = String(text || '').trim();
-  const m = t.match(EMAIL_RE);
-  if(!m) return {name: t, email: ''};
-  const name = t.replace(m[0], ' ')
-    .replace(/[<>()]/g, ' ')
-    .replace(/\s*[-\u2013\u2014,;:|]\s*$/, '')
-    .replace(/^\s*[-\u2013\u2014,;:|]\s*/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  return {name, email: m[0]};
-}
-
-function contactName(c){
-  if(c.contactName !== undefined || c.contactEmail !== undefined) return c.contactName || '';
-  return splitContact(c.primaryContact).name;
-}
-
-function contactEmail(c){
-  if(c.contactName !== undefined || c.contactEmail !== undefined) return c.contactEmail || '';
-  return splitContact(c.primaryContact).email;
-}
-
-// View-only page shows SIM location as city, state and country only.
-// "2825 Airport Drive, Vero Beach, FL 32960, USA" -> "Vero Beach, FL, USA".
-// Entries without a street number ("Greece", "RBHQ") are shown as entered;
-// any other full address shows just its country (the last part).
-function publicLocation(loc){
-  const s = String(loc || '').trim();
-  if(!s) return '';
-  if(!/\d/.test(s)) return s;
-  const parts = s.split(',').map(x => x.trim()).filter(Boolean);
-  const si = parts.findIndex(x => /^[A-Z]{2}\s+\d{5}(-\d{4})?$/.test(x));
-  if(si > 0){
-    const state = parts[si].slice(0, 2);
-    const country = parts.slice(si + 1).join(', ') || 'USA';
-    return `${parts[si - 1]}, ${state}, ${country}`;
-  }
-  const last = parts[parts.length - 1];
-  return /\d/.test(last) ? '' : last;
-}
-
-function customerKey(c){
-  return (c.customer || 'Unassigned').trim() || 'Unassigned';
-}
-
-function toggleCustomer(name){
-  if(expandedCustomers.has(name)) expandedCustomers.delete(name);
-  else expandedCustomers.add(name);
-  render();
-}
-
-function escapeAttr(s){
-  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
-
-// For completed activities: how many days after the due date they were completed ('' if on time or unknown).
-function lateNote(a){
-  if(a.status !== 'Complete' || !a.dateDue || !a.dateCompleted) return '';
-  const days = Math.round((new Date(a.dateCompleted + 'T00:00:00') - new Date(a.dateDue + 'T00:00:00')) / 86400000);
-  if(days <= 0) return '';
-  return ` <span class="late-note">(${days} day${days === 1 ? '' : 's'} late)</span>`;
-}
-
-function isActivityOverdue(a){
-  if(a.status === 'Complete') return false;
-  if(!a.dateDue) return false;
-  const today = new Date(); today.setHours(0,0,0,0);
-  return new Date(a.dateDue + 'T00:00:00') < today;
-}
-
-// Activity statuses: Not Started, In Progress, Waiting (on another party), Complete.
-// "Pending" is the old name for Not Started and is shown as Not Started.
-function activityStatusLabel(status){
-  if(!status || status === 'Pending') return 'Not Started';
-  return status;
-}
-
-function activityStatusClass(status){
-  if(status === 'Complete') return 'sage';
-  if(status === 'In Progress') return 'gold';
-  if(status === 'Waiting') return 'plum';
-  return 'slate';
-}
-
-// ---- Activity comments ----
-// Each activity keeps a running thread: comments: [{id, text, date, time}], oldest first.
-// ---- Text with line breaks and bullets ----
-// Shows typed text as written: line breaks are kept, and lines starting with "- ", "* " or "•"
-// become a bulleted list. Text is escaped first, so nothing typed or pasted can change the page.
-function formatText(s){
-  const lines = String(s == null ? '' : s).replace(/\r\n?/g, '\n').split('\n');
-  const out = [];
-  let list = null;
-  lines.forEach(line => {
-    const m = line.match(/^\s*(?:[-*]\s+|\u2022\s*)(.*)$/);
-    if(m){
-      if(!list){ list = []; }
-      list.push(escapeHtml(m[1]));
-      return;
-    }
-    if(list){ out.push({list}); list = null; }
-    out.push({line: escapeHtml(line)});
-  });
-  if(list) out.push({list});
-  let html = '';
-  out.forEach((part, i) => {
-    if(part.list){
-      html += '<ul class="text-list">' + part.list.map(li => `<li>${li}</li>`).join('') + '</ul>';
-    }else{
-      const prevIsLine = i > 0 && !out[i-1].list;
-      html += (prevIsLine ? '<br>' : '') + part.line;
-    }
-  });
-  return html;
-}
-
-// ---- Activity status groups ----
-// Activities are shown in one expandable group per status, in this order. Groups start collapsed;
-// which groups are open is remembered (per certification) while the page is open.
-const ACTIVITY_GROUPS = ['Not Started', 'In Progress', 'Waiting', 'Complete'];
-
-const openActivityGroups = new Set();
-
-function activityGroupKey(certId, status){ return certId + '|' + status; }
-
-function activityGroupOf(a){
-  const s = activityStatusLabel(a.status);
-  return ACTIVITY_GROUPS.includes(s) ? s : 'Not Started';
-}
-
-// Non-empty groups for a certification, each with its activities sorted:
-// open groups by due date (entered date when there's no due date), Completed newest first.
-function activityGroups(c){
-  const entries = Array.isArray(c.activityLog) ? c.activityLog : [];
-  return ACTIVITY_GROUPS.map(status => {
-    const items = entries.filter(a => activityGroupOf(a) === status);
-    if(status === 'Complete'){
-      items.sort((a,b) => {
-        const ad = (a.dateCompleted || a.dateDue || a.dateCreated || '') + (a.dateCompleted ? to24(a.timeCompleted) : '');
-        const bd = (b.dateCompleted || b.dateDue || b.dateCreated || '') + (b.dateCompleted ? to24(b.timeCompleted) : '');
-        return bd.localeCompare(ad);
-      });
-    }else{
-      items.sort((a,b) => (a.dateDue || a.dateCreated || '').localeCompare(b.dateDue || b.dateCreated || ''));
-    }
-    return {status, items};
-  }).filter(g => g.items.length);
-}
-
-// "9:05 AM" -> "09:05" so times sort correctly; unknown formats sort first.
-function to24(t){
-  const m = String(t || '').match(/^(\d{1,2}):(\d{2})\s*([AP]M)?$/i);
-  if(!m) return '';
-  let h = Number(m[1]) % 12;
-  if(m[3] && m[3].toUpperCase() === 'PM') h += 12;
-  if(!m[3]) h = Number(m[1]);
-  return String(h).padStart(2, '0') + ':' + m[2];
-}
-
-function activitiesAnyOpen(c){
-  const entries = Array.isArray(c.activityLog) ? c.activityLog : [];
-  return ACTIVITY_GROUPS.some(s => openActivityGroups.has(activityGroupKey(c.id, s)))
-    || entries.some(a => openThreads.has(a.id));
-}
-
-function toggleActivityGroup(certId, status){
-  const key = activityGroupKey(certId, status);
-  if(openActivityGroups.has(key)) openActivityGroups.delete(key);
-  else openActivityGroups.add(key);
-  render();
-}
-
-// Collapse all closes every group and comment thread for this certification;
-// Expand all opens every group and leaves comment threads closed.
-function toggleAllActivities(certId){
-  const c = certs.find(x => x.id === certId);
-  if(!c) return;
-  const entries = Array.isArray(c.activityLog) ? c.activityLog : [];
-  if(activitiesAnyOpen(c)){
-    ACTIVITY_GROUPS.forEach(s => openActivityGroups.delete(activityGroupKey(certId, s)));
-    entries.forEach(a => openThreads.delete(a.id));
-  }else{
-    activityGroups(c).forEach(g => openActivityGroups.add(activityGroupKey(certId, g.status)));
-  }
-  render();
-}
-
-function activityToggleAllBtn(c){
-  if(!(Array.isArray(c.activityLog) && c.activityLog.length)) return '';
-  const any = activitiesAnyOpen(c);
-  const label = any ? 'Collapse all' : 'Expand all';
-  return `<button class="act-toggle-all" type="button" onclick="toggleAllActivities('${c.id}')" title="${label} tasks">${any ? ICON.collapseAll : ICON.expandAll}<span>${label}</span></button>`;
-}
-
-function renderActivityGroups(c, renderEntry){
-  const groups = activityGroups(c);
-  if(!groups.length) return '<div class="changelog-entry"><span class="changelog-text" style="color:var(--ink-faint)">No tasks yet</span></div>';
-  return '<div class="act-groups">' + groups.map((g, gi) => {
-    const done = g.status === 'Complete';
-    const n = g.items.length;
-    const overdue = done ? 0 : g.items.filter(isActivityOverdue).length;
-    let dateNote;
-    if(done){
-      dateNote = g.items[0].dateCompleted ? `Latest ${fmtDate(g.items[0].dateCompleted)}` : '';
-    }else{
-      const nextDue = g.items.map(a => a.dateDue).filter(Boolean).sort()[0];
-      dateNote = nextDue ? `Next due ${fmtDate(nextDue)}` : 'No due dates';
-    }
-    const open = openActivityGroups.has(activityGroupKey(c.id, g.status));
-    const bodyId = `grp-${c.id}-${gi}`;
-    return `
-      <button class="act-group" type="button" aria-expanded="${open}" aria-controls="${bodyId}" onclick="toggleActivityGroup('${c.id}', '${g.status}')">${ICON.chevron}<span class="pill pill-${activityStatusClass(g.status)}">${done ? 'Completed' : escapeHtml(g.status)}</span><span class="act-group-count">${n} ${n === 1 ? 'task' : 'tasks'}</span>${overdue ? `<span class="pill pill-overdue">${overdue} overdue</span>` : ''}<span class="act-group-date">${dateNote}</span></button>
-      ${open ? `<div class="act-group-body" id="${bodyId}">${g.items.map(a => renderEntry(a)).join('')}</div>` : ''}`;
-  }).join('') + '</div>';
-}
-
-function escapeHtml(s){
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : s;
-  return d.innerHTML;
-}
-
-function renderDocLocation(loc){
-  if(!loc) return '';
-  const isUrl = /^https?:\/\//i.test(loc.trim());
-  if(isUrl){
-    return `<div class="doc-loc"><a href="${escapeHtml(loc.trim())}" target="_blank" rel="noopener noreferrer">${escapeHtml(loc.trim())}</a></div>`;
-  }
-  return `<div class="doc-loc">${escapeHtml(loc)}</div>`;
-}
-
-function renderDocItem(doc){
-  const name = typeof doc === 'string' ? doc : (doc.name || '');
-  return escapeHtml(name);
-}
 
 // Collapsed sidebar shows in full on phones; redraw when the window crosses that size.
 try{ window.matchMedia('(max-width: 760px)').addEventListener('change', () => { if(sidebarCollapsed) render(); }); }catch(e){}

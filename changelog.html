@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=2.5.0">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.0">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,32 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.2.0">
+        <h2 class="vh"><span class="vn">v3.2.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>Devices and projects: each simulator (customer and SN) is now a device, with one project per aircraft certification on it. The device holds the customer, SN, SIM model, location, contact and document location; each project holds its own authority, country, level, aircraft, due date and qualification, since one device can be certified under different authorities over time.</li>
+          <li>Documents and tasks can belong to the whole device or to one aircraft. On a device with more than one aircraft, shared items carry an "All aircraft" tag. The first time the editor opens, it shows what will change, saves a backup of the old file, and converts the data once; items that were identical on every aircraft of a device move to the device.</li>
+          <li>The sidebar is now four entries: Home, Projects, ATD Approvals and Regulatory Library, each opening in the main panel. Projects shows the number of open tasks (red when one is overdue), Regulatory Library the number of updates. It still collapses to an icon strip.</li>
+          <li>Projects page: projects grouped by regulatory authority (red edge), then customer (navy edge, open / total projects), SN ("n open" tasks) and aircraft. Every level can be collapsed.</li>
+          <li>Project pages show the device and the project side by side. A device with more than one aircraft has its own device page, listing its projects with the device's documents and tasks.</li>
+          <li>Regulatory Library moved into the main panel, grouped by authority (closed until you open one, except where an update is waiting).</li>
+          <li>Titles in the sidebar, page headings and home cards use title case: Projects and Tasks, ATD Approvals, Regulatory Library.</li>
+        </ul>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>Certification templates in the Regulatory Library: Word templates in Google Drive, per authority and (optionally) level. On a project, Documents &rarr; From template makes a copy in Drive, points to the customer's project folder, and links the copy, noting it in the document history.</li>
+          <li>Export CSV on the Projects page: one row per project with device, authority, status, qualification, regulation and task counts. The view-only page leaves out contact email and street address.</li>
+          <li>Editor: Version history (Admin, or the footer link) lists every save of the projects data; pick one to see which projects restoring it would bring back, remove or change, then restore it.</li>
+          <li>Editor: Add customer and Add device lead straight into Add aircraft for the new device, shown as a navy device badge at the top of the form. Add aircraft on an SN or device page adds another certification to that device.</li>
+        </ul>
+        <h3 class="grp">Behind the scenes</h3>
+        <ul>
+          <li>Code clean-up: the editor's code moved to assets/editor.js, the Projects pages to assets/projects.js, older data fixes now run once in the conversion, and unused styles were removed.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.1.4">
-        <h2 class="vh"><span class="vn">v3.1.4</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.1.4</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>Renamed from Certification Project Tracker to Certification Tracker, since it now covers ATD approvals and the regulatory library as well as projects. The web address is unchanged.</li>
@@ -131,7 +155,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.1.4</div>
+  <div class="version-footer">v3.2.0</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

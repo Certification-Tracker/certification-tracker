@@ -1,5 +1,5 @@
 // =====================================================================
-// FAA ATD approvals (3.1): Redbird ATD devices' QAG and LOA status.
+// ATD Approvals (3.1): Redbird ATD devices' FAA QAG and LOA status.
 // data/atd.json comes from FAA_Approval_Tracker.xlsx (imported in the editor); data/kb-status.json
 // and the atd/ folder are written weekly by scripts/check_kb.py, which finds each device's QAG and
 // LOA in the Redbird knowledge base and compares them with the spreadsheet.
@@ -40,7 +40,6 @@ async function loadAtd(){
   render();
 }
 
-const atdDevices = () => atd.devices;
 const atdDevice = id => atd.devices.find(d => d.id === id);
 
 // ---- Versions: number first, then letter, so 2.1 < 2.1A < 2.1B < 2.2 and 4.12A < 4.13 ----
@@ -154,20 +153,6 @@ function diffLine(x){ return `${escapeHtml(x.label)}: spreadsheet ${escapeHtml(x
 function openAtd(){ navigate({type: 'atd'}); }
 function openAtdDevice(id, doc, page){ navigate({type: 'atd-dev', id, doc: doc || '', page: page || 1}); }
 
-// Sidebar: a section of its own, between Certifications and the Regulatory library.
-function renderAtdSidebar(){
-  if(!atdLoaded || !atd.devices.length) return '';
-  const active = view.type === 'atd' || view.type === 'atd-dev';
-  const behind = EDITOR ? kbBehind().length : 0;
-  return `
-    ${sideSectionHead('FAA ATD approvals', '')}
-    <button class="side-cert side-atd ${active ? 'active' : ''}" type="button" ${active ? 'aria-current="true"' : ''} onclick="openAtd()">
-      ${ICON.device}
-      <span class="side-cert-name">ATD devices</span>
-      ${behind ? `<span class="tab-count alert" title="Knowledge base behind the spreadsheet">${behind}</span>` : `<span class="tab-count zero">${atd.devices.length}</span>`}
-    </button>`;
-}
-
 // Editor only: the knowledge base lists older documents than the spreadsheet.
 function renderKbBehindNotice(){
   if(!EDITOR) return '';
@@ -199,18 +184,17 @@ function renderAtdHome(){
   const chip = (n, label, cls) => `<span class="pill pill-${n ? cls : 'neutral'}">${n} ${label}</span>`;
   const act = d => ({type: 'atd', id: d.id});
   const rows = [
-    ...warn.map(d => homeRow(ATD_BANDS[atdBand(d)].label, ATD_BANDS[atdBand(d)].cls, escapeHtml(d.name), `expires ${fmtDate(d.expiration)} \u00b7 resubmit by ${fmtDate(atdResubmitBy(d))}`, act(d))),
-    ...pending.map(d => homeRow('Pending', 'slate', `${escapeHtml(d.name)} \u00b7 ${vLabel(d.submittedVersion)}${d.faaTracking ? ` <span class="row-sub">FAA #${escapeHtml(d.faaTracking)}</span>` : ''}`, d.submittedDate ? 'submitted ' + fmtDate(d.submittedDate) : 'submitted', act(d))),
-    ...(next && !warn.includes(next) ? [homeRow('Next resubmit', 'neutral', escapeHtml(next.name), 'by ' + fmtDate(atdResubmitBy(next)), act(next))] : [])
+    ...warn.map(d => homeRow([[ATD_BANDS[atdBand(d)].label, ATD_BANDS[atdBand(d)].cls]], escapeHtml(d.name), `expires ${fmtDate(d.expiration)} \u00b7 resubmit by ${fmtDate(atdResubmitBy(d))}`, act(d))),
+    ...pending.map(d => homeRow([['Pending', 'slate']], `${escapeHtml(d.name)} \u00b7 ${vLabel(d.submittedVersion)}${d.faaTracking ? ` <span class="row-sub">FAA #${escapeHtml(d.faaTracking)}</span>` : ''}`, d.submittedDate ? 'submitted ' + fmtDate(d.submittedDate) : 'submitted', act(d))),
+    ...(next && !warn.includes(next) ? [homeRow([['Next resubmit', 'neutral']], escapeHtml(next.name), 'by ' + fmtDate(atdResubmitBy(next)), act(next))] : [])
   ];
-  return homeCard('FAA ATD approvals', `<button class="text-link" type="button" onclick="openAtd()">Open ATD devices ${ICON.arrowRight}</button>`,
+  return homeCard('ATD Approvals', `<button class="text-link" type="button" onclick="openAtd()">Open ATD Approvals ${ICON.arrowRight}</button>`,
     `<div class="atd-chips home-chips">${chip(counts.green, 'green', 'sage')}${chip(counts.yellow, 'yellow', 'gold')}${chip(counts.red + counts.expired, 'red', 'overdue')}${counts.incomplete ? chip(counts.incomplete, 'incomplete', 'neutral') : ''}</div>${rows.join('')}`);
 }
 
-// The ATD devices page.
+// The ATD Approvals page.
 function renderAtdView(){
   if(!atdLoaded) return '<div class="muted">Loading…</div>';
-  rowActions = [];
   const src = atd.source || {};
   const list = atdOrdered();
   const counts = {};
@@ -238,10 +222,10 @@ function renderAtdView(){
       }).join('')).join('')}
     </div>` : `<div class="muted list-empty">${EDITOR ? 'No devices yet. Import FAA_Approval_Tracker.xlsx to start.' : 'No devices yet.'}</div>`;
   return `
-    <div class="detail-context">FAA ATD approvals</div>
+    <div class="detail-context">FAA</div>
     <div class="detail-head">
       <div>
-        <h2 class="detail-title">ATD devices <span class="title-count">(${list.length})</span></h2>
+        <h2 class="detail-title">ATD Approvals <span class="title-count">(${list.length})</span></h2>
         <div class="doc-meta">${meta ? 'Spreadsheet: ' + meta : 'No spreadsheet imported yet'}${kbChecked() ? ` · Knowledge base checked ${kbChecked()}` : ''}</div>
       </div>
     </div>
@@ -265,7 +249,7 @@ function renderAtdDevice(){
   const url = file ? pdfPageUrl(file.path, view.page || 1) : '';
   const days = atdDays(d);
   const field = (label, value) => `<div><div class="fk">${label}</div><div class="fv">${value}</div></div>`;
-  const linked = (d.certIds || []).map(id => certs.find(c => c.id === id)).filter(Boolean);
+  const linked = (d.certIds || []).map(projectById).filter(Boolean);
   const article = kbArticleUrl(d);
   const kbVer = k.kb && k.kb.qagVersion;
   let kbNote = '';
@@ -280,10 +264,10 @@ function renderAtdDevice(){
     else if(!k.status) kbNote = `<div class="reg-note muted-note">The weekly knowledge base check hasn't run for this device yet. Run it from the Actions tab in tracker-data, or wait for Monday's run.</div>`;
     if(k.problems && k.problems.length) kbNote += `<div class="reg-note error">${k.problems.map(escapeHtml).join('<br>')}</div>`;
   }
-  const back = navFrom ? backLinkHtml() : `<button class="back-link" type="button" onclick="openAtd()">${ICON.arrowLeft}<span>ATD devices</span></button>`;
+  const back = navFrom ? backLinkHtml() : backBtn('ATD Approvals', 'openAtd()');
   return `
     ${back}
-    <div class="detail-context">FAA ATD approvals / ATD devices</div>
+    <div class="detail-context">FAA / ATD Approvals</div>
     <div class="detail-head">
       <div>
         <h2 class="detail-title">${escapeHtml(d.name)} <span class="title-count">${escapeHtml(d.type || '')}</span></h2>
@@ -300,7 +284,7 @@ function renderAtdDevice(){
       ${field('Submitted', d.submittedVersion ? `${vLabel(d.submittedVersion)}${d.submittedDate ? ', ' + fmtDate(d.submittedDate) : ''}${atdPending(d) ? '' : ' (approved)'}` : '—')}
       ${field('FAA tracking #', d.faaTracking ? escapeHtml(d.faaTracking) : '—')}
       ${d.notes ? `<div class="span-all"><div class="fk">Notes</div><div class="fv">${escapeHtml(d.notes)}</div></div>` : ''}
-      <div class="span-all"><div class="fk">Linked certification projects</div><div class="fv">${linked.length ? linked.map(c => `<button class="text-link" type="button" onclick="selectCert('${c.id}')">${escapeHtml(certName(c))}</button>`).join(', ') : 'None'}</div></div>
+      <div class="span-all"><div class="fk">Linked projects</div><div class="fv atd-linked">${linked.length ? sortProjects(linked).map(p => `<button class="atd-linked-item" type="button" onclick="openProject('${p.id}')"><b>${escapeHtml(customerKey(p))}</b><span class="row-sub">SN ${escapeHtml(p.serial || '\u2014')} \u00b7 ${escapeHtml(projectName(p))}${p.completed ? ' \u00b7 Completed' : ''}</span></button>`).join('') : 'None'}</div></div>
     </div>
     ${kbNote}
     <div class="atd-docs">
@@ -330,14 +314,14 @@ function attachAtdPdf(){
     `Couldn't load ${file.path} from the data repo.`);
 }
 
-// Certification page: the ATD devices this certification is linked to.
-function renderCertAtdLinks(c){
-  const devs = atd.devices.filter(d => (d.certIds || []).includes(c.id));
+// Project page: the ATD devices this project is linked to.
+function renderProjectAtdLinks(p){
+  const devs = atd.devices.filter(d => (d.certIds || []).includes(p.id));
   if(!devs.length) return '';
   return `<div class="cert-atd-links"><div class="fk">ATD device</div><div class="fv">${devs.map(d => `<button class="text-link" type="button" onclick="openAtdDevice('${d.id}')">${escapeHtml(d.name)}</button> ${bandPill(d)}`).join(' ')}</div></div>`;
 }
 
-// Summary bar lists.
+// List rows.
 function atdLine(d){
   return `<b class="row-strong">${escapeHtml(d.name)}</b> <span class="row-sub">· ${escapeHtml(d.type || '')} · QAG ${vLabel(d.version)}</span>`;
 }
@@ -378,7 +362,7 @@ function searchAtd(t){
 
 function renderAtdSearch(res, all, from, q){
   let out = '';
-  const head = (count) => `<div class="result-group"><b>ATD devices <span class="title-count">(${count})</span></b>${all && count > 3 ? `<button class="side-tool" type="button" onclick="setSearchTab('atd')">Show all</button>` : ''}</div>`;
+  const head = (count) => `<div class="result-group"><b>ATD Approvals <span class="title-count">(${count})</span></b>${all && count > 3 ? `<button class="side-tool" type="button" onclick="setSearchTab('atd')">Show all</button>` : ''}</div>`;
   if(!res.count) return '';
   out += head(res.count);
   out += res.devices.slice(0, all ? 3 : undefined).map(d =>
@@ -514,7 +498,7 @@ function diffAtdImport(oldDevices, newDevices){
   return out;
 }
 
-// Keeps what only the tracker knows (KB link, not-published setting, linked certifications) across imports.
+// Keeps what only the tracker knows (KB link, not-published setting, linked projects) across imports.
 function mergeAtdImport(oldDevices, newDevices){
   const byId = Object.fromEntries(oldDevices.map(d => [d.id, d]));
   return newDevices.map(d => ({...d, kbUrl: (byId[d.id] || {}).kbUrl || '', kbExclude: !!(byId[d.id] || {}).kbExclude, certIds: (byId[d.id] || {}).certIds || []}));

@@ -5,5 +5,5 @@ read through the GitHub API with an access key (viewers: read-only key; editor: 
 
 - `index.html` — view-only page (asks for an access key on first visit)
 - `admin/project-management.html` — editor
-- `assets/` — shared code and styles (`atd.js`: FAA ATD approvals page)
+- `assets/` — shared code and styles: `tracker.js` (data, layout, home, search, Regulatory Library), `projects.js` (Projects, device and project pages), `atd.js` (ATD Approvals), `editor.js` (editor only), `tracker.css`
 - `changelog.html` — change log

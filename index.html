@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.1.4">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.0">
 </head>
 <body>
 <div class="wrap">
@@ -29,7 +29,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="changelog.html" title="Change log">v3.1.4</a></div>
+  <div class="version-footer"><a href="changelog.html" title="Change log">v3.2.0</a></div>
 </div>
 
 <div class="modal-bg" id="settings-modal-bg">
@@ -49,10 +49,11 @@
     </div>
   </div>
 </div>
-<script src="assets/tracker.js?v=3.1.4"></script>
-<script src="assets/atd.js?v=3.1.4"></script>
+<script src="assets/tracker.js?v=3.2.0"></script>
+<script src="assets/projects.js?v=3.2.0"></script>
+<script src="assets/atd.js?v=3.2.0"></script>
 <script>
-// View-only page: needs a read-only key for the private data repo. Shared code is in assets/tracker.js.
+// View-only page: needs a read-only key for the private data repo. Shared code is in assets/.
 
 // The viewer key (read-only), or the editor key if this browser is signed in to edit.
 function storedViewKey(){
@@ -173,12 +174,13 @@ async function load(){
   if(!ghConfig.token){ showGate(); return; }
   try{
     showBanner('info', 'Loading from GitHub&hellip;');
-    const remote = await fetchFromGitHub();
-    if(remote === null){
-      certs = [];
+    const raw = await fetchFromGitHub();
+    if(raw === null){
+      setData({devices: [], projects: []});
       showBanner('error', 'No data file found at that path yet.');
     }else{
-      certs = remote;
+      // A file from before 3.2 is shown converted to devices and projects (the editor saves the conversion).
+      setData(readData(raw).data);
       hideBanner();
     }
   }catch(e){
@@ -190,7 +192,7 @@ async function load(){
       return;
     }
     showBanner('error', 'Could not load from GitHub: ' + escapeHtml(e.message));
-    certs = [];
+    setData({devices: [], projects: []});
   }
   document.getElementById('list').innerHTML = '';
   render();
@@ -203,9 +205,9 @@ async function refreshFromGitHub(){
   if(Date.now() - lastFetchAt < 5000) return;
   const prevSha = currentSha;
   try{
-    const remote = await fetchFromGitHub();
-    if(remote && currentSha !== prevSha){
-      certs = remote;
+    const raw = await fetchFromGitHub();
+    if(raw && currentSha !== prevSha){
+      setData(readData(raw).data);
       hideBanner();
       render();
     }
@@ -225,8 +227,8 @@ if('BroadcastChannel' in window){
   const syncChannel = new BroadcastChannel('cert-tracker-sync');
   syncChannel.onmessage = (e) => {
     const m = e.data || {};
-    if(m.type === 'saved' && m.key === SYNC_KEY && Array.isArray(m.data)){
-      certs = m.data;
+    if(m.type === 'saved' && m.key === SYNC_KEY && isV4(m.data)){
+      setData(normalizeV4(m.data));
       if(m.library) library = normalizeLibrary(m.library);
       if(m.atd) atd = normalizeAtd(m.atd);
       currentSha = m.sha || currentSha;
