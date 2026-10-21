@@ -208,7 +208,7 @@ function renderDeviceView(d){
     ${EDITOR ? `<div class="detail-actions">${actionBtn('plus', 'Add aircraft', `openProjectModal(null, '${d.id}')`, {compact: false})}</div>` : ''}
     ${deviceBox(d)}
     <div class="changelog">
-      <div class="fk">Aircraft Projects</div>
+      <div class="section-head"><span>Aircraft Projects</span></div>
       <div class="row-list dev-projects">${rows || '<div class="muted list-empty">No projects on this device.</div>'}</div>
     </div>
     ${renderDocumentsSection(d)}
@@ -258,7 +258,7 @@ function renderQualification(p){
   if(!hasQualification(p) && !EDITOR) return '';
   return `
     <div class="changelog qual-section">
-      <div class="fk section-head"><span>Qualification ${q.status ? `<span class="pill pill-${qualStatusCls(q.status)}">${escapeHtml(q.status)}</span>` : ''}</span>${EDITOR ? actionBtn('edit', 'Edit', `openProjectModal('${p.id}', '', null, 'qual')`, {compact: false}) : ''}</div>
+      <div class="section-head"><span>Qualification ${q.status ? `<span class="pill pill-${qualStatusCls(q.status)}">${escapeHtml(q.status)}</span>` : ''}</span>${EDITOR ? actionBtn('edit', 'Edit', `openProjectModal('${p.id}', '', null, 'qual')`, {compact: false}) : ''}</div>
       ${hasQualification(p) ? `
       <div class="field-grid">
         ${fieldHtml('Certificate / LOA number', escapeHtml(q.certificateNumber || '—'))}
@@ -279,7 +279,7 @@ function renderDocumentsSection(ctx){
   const tools = EDITOR ? `<span class="section-tools">${isProj ? actionBtn('copy', 'From template', `openFromTemplate('${ctx.id}')`, {compact: false}) : ''}${actionBtn('plus', 'Add', `openDocumentModal('${ctx.id}')`, {compact: false})}</span>` : '';
   return `
     <div class="changelog">
-      <div class="fk section-head"><span>Documents</span>${tools}</div>
+      <div class="section-head"><span>Documents</span>${tools}</div>
       ${items.length ? items.map(({item: doc, owner}) => {
         const actions = previewBtn(ctx, doc) + viewBtn(doc) + (EDITOR
           ? actionBtn('edit', 'Edit', `openDocumentModal('${ctx.id}', '${owner.id}', '${doc.id}')`) + actionBtn('trash', 'Delete', `deleteDocument('${owner.id}', '${doc.id}')`, {cls: 'danger'})
@@ -389,139 +389,171 @@ function renderDocHistory(ctx){
     </div>`;
 }
 
-// ---- Tasks ----
-// One expandable group per status (Not Started, In Progress, Waiting, Completed), each starting collapsed.
-// Open groups sort by due date (entered date when there's none); Completed newest first.
-function taskGroups(ctx){
-  const entries = scopedList(ctx, 'tasks');
-  return TASK_GROUPS.map(status => {
-    const items = entries.filter(x => taskGroupOf(x.item) === status);
-    if(status === 'Complete'){
-      const k = a => (a.dateCompleted || a.dateDue || a.dateCreated || '') + (a.dateCompleted ? to24(a.timeCompleted) : '');
-      items.sort((x, y) => k(y.item).localeCompare(k(x.item)));
-    }else{
-      items.sort((x, y) => (x.item.dateDue || x.item.dateCreated || '').localeCompare(y.item.dateDue || y.item.dateCreated || ''));
-    }
-    return {status, items};
-  }).filter(g => g.items.length);
+// ---- Tasks (3.2.1) ----
+// One frame per status (Not Started, In Progress, Waiting, Completed), open unless folded. Each task is a row
+// (reference, title, due or status, comment count, Complete/Reopen); clicking it opens the details and its
+// Activity: status changes with their reasons and comments, oldest first.
+// Rows sort by reference in natural order (6.1.C.9 before 6.1.C.10); tasks without one follow by due date, then entered.
+const taskEnteredKey = a => (a.dateCreated || '') + to24(a.timeCreated);
+function taskSortCmp(x, y){
+  const a = x.item, b = y.item;
+  return (a.ref ? 0 : 1) - (b.ref ? 0 : 1) || (a.ref && b.ref ? textCmp(a.ref, b.ref) : 0)
+    || dateCmp(a.dateDue, b.dateDue) || taskEnteredKey(a).localeCompare(taskEnteredKey(b));
 }
 
+function taskGroups(ctx){
+  const entries = scopedList(ctx, 'tasks');
+  return TASK_GROUPS.map(status => ({status, items: entries.filter(x => taskGroupOf(x.item) === status).sort(taskSortCmp)}))
+    .filter(g => g.items.length);
+}
+
+const statusPill = s => `<span class="pill pill-${taskStatusClass(s)}">${s === 'Complete' ? 'Completed' : escapeHtml(s)}</span>`;
+
 function tasksAnyOpen(ctx){
-  return TASK_GROUPS.some(s => openTaskGroups.has(taskGroupKey(ctx.id, s)))
-    || scopedList(ctx, 'tasks').some(x => openThreads.has(x.item.id));
+  return taskGroups(ctx).some(g => !closedTaskGroups.has(taskGroupKey(ctx.id, g.status)))
+    || scopedList(ctx, 'tasks').some(x => openTasks.has(x.item.id));
 }
 
 function toggleTaskGroup(ctxId, status){
   const key = taskGroupKey(ctxId, status);
-  if(openTaskGroups.has(key)) openTaskGroups.delete(key); else openTaskGroups.add(key);
+  if(closedTaskGroups.has(key)) closedTaskGroups.delete(key); else closedTaskGroups.add(key);
   render();
 }
 
-// Collapse all closes every group and comment thread on the page; Expand all opens every group.
+// Collapse all folds every group and closes every task on the page; Expand all opens the groups.
 function toggleAllTasks(ctxId){
   const ctx = ownerById(ctxId);
   if(!ctx) return;
   if(tasksAnyOpen(ctx)){
-    TASK_GROUPS.forEach(s => openTaskGroups.delete(taskGroupKey(ctxId, s)));
-    scopedList(ctx, 'tasks').forEach(x => openThreads.delete(x.item.id));
+    TASK_GROUPS.forEach(s => closedTaskGroups.add(taskGroupKey(ctxId, s)));
+    scopedList(ctx, 'tasks').forEach(x => openTasks.delete(x.item.id));
   }else{
-    taskGroups(ctx).forEach(g => openTaskGroups.add(taskGroupKey(ctxId, g.status)));
+    TASK_GROUPS.forEach(s => closedTaskGroups.delete(taskGroupKey(ctxId, s)));
   }
   render();
 }
 
-function renderTaskEntry(x, ctx){
+function toggleTaskRow(taskId){
+  if(openTasks.has(taskId)) openTasks.delete(taskId); else openTasks.add(taskId);
+  render();
+}
+
+// Status changes and comments together, oldest first.
+function taskActivity(a){
+  const key = (date, time, ts) => (date || '') + '|' + (to24(time) || '00:00') + '|' + String(ts || 0).padStart(14, '0');
+  return [
+    ...arr(a.log).map(e => ({kind: 'log', e, k: key(e.date, e.time, e.ts)})),
+    ...arr(a.comments).map(cm => ({kind: 'comment', e: cm, k: key(cm.date, cm.time, Number(String(cm.id || '').replace(/\D/g, '').slice(0, 13)) || 0)}))
+  ].sort((x, y) => x.k.localeCompare(y.k));
+}
+
+function renderActivity(owner, a){
+  const items = taskActivity(a);
+  const when = e => `${fmtDate(e.date)}${e.time ? ', ' + escapeHtml(e.time) : ''}`;
+  const rows = items.map(({kind, e}) => {
+    if(kind === 'comment') return `
+      <div class="act-item act-comment">
+        <span class="act-when">${when(e)}</span>
+        <div class="act-body">${ICON.comment}<span class="rich-text">${formatText(e.text)}</span></div>
+        ${EDITOR ? `<button class="comment-del" type="button" title="Delete comment" aria-label="Delete comment" onclick="deleteComment('${owner.id}', '${a.id}', '${e.id}')">${ICON.x}</button>` : '<span></span>'}
+      </div>`;
+    const change = e.kind === 'entered'
+      ? `<span class="act-entered">Entered</span>`
+      : `${e.from ? statusPill(e.from) + '<span class="act-arrow">→</span>' : '<span class="act-arrow">→</span>'}${statusPill(e.to)}`;
+    const why = e.legacy ? '<div class="act-why muted">Recorded before 3.2.1</div>' : (e.reason ? `<div class="act-why rich-text">${formatText(e.reason)}</div>` : '');
+    return `
+      <div class="act-item act-log">
+        <span class="act-when">${when(e)}</span>
+        <div class="act-body"><div>${change}</div>${why}</div>
+        <span></span>
+      </div>`;
+  }).join('');
+  const key = owner.id + '|' + a.id;
+  const form = EDITOR ? `
+      <div class="comment-add">
+        <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment('${owner.id}', '${a.id}'); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
+        <button class="btn-primary" type="button" onclick="addComment('${owner.id}', '${a.id}')">Add</button>
+      </div>
+      <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>` : '';
+  return `<div class="act-list"><div class="act-head">Activity</div>${rows || '<div class="entry-empty">Nothing yet</div>'}</div>${form}`;
+}
+
+function taskDueCell(a){
+  const status = taskGroupOf(a);
+  if(status === 'Complete'){
+    const late = lateNote(a).replace(/<[^>]+>/g, '').replace(/[()]/g, '').trim();
+    return `<span class="pill pill-sage">Done ${fmtDate(a.dateCompleted).replace(/, \d{4}$/, '')}</span>${late ? ` <span class="muted">${late}</span>` : ''}`;
+  }
+  if(a.dateDue) return isTaskOverdue(a) ? `<span class="pill pill-overdue">Overdue</span><span class="due-late">${fmtDate(a.dateDue).replace(/, \d{4}$/, '')}</span>` : fmtDate(a.dateDue).replace(/, \d{4}$/, '');
+  if(status === 'Waiting' && a.waitingSince) return `<span class="muted">since ${fmtDate(a.waitingSince).replace(/, \d{4}$/, '')}</span>`;
+  return '<span class="muted">—</span>';
+}
+
+function renderTaskRow(x, ctx){
   const a = x.item, owner = x.owner;
-  const status = taskStatusLabel(a.status);
-  const over = isTaskOverdue(a);
+  const open = openTasks.has(a.id);
+  const done = taskGroupOf(a) === 'Complete';
+  const n = arr(a.comments).length;
+  const btn = !EDITOR ? '' : done
+    ? `<button class="task-btn" type="button" onclick="event.stopPropagation(); openStatusModal('${owner.id}', '${a.id}', 'Not Started')">${ICON.reopen}<span>Reopen</span></button>`
+    : `<button class="task-btn ok" type="button" onclick="event.stopPropagation(); openStatusModal('${owner.id}', '${a.id}', 'Complete')">${ICON.check}<span>Complete</span></button>`;
+  const meta = [
+    `Entered ${fmtDate(a.dateCreated)}${a.timeCreated ? ', ' + escapeHtml(a.timeCreated) : ''}`,
+    a.dateDue ? `Due ${fmtDate(a.dateDue)}` : '',
+    a.dateUpdated && a.dateUpdated !== a.dateCreated ? `Updated ${fmtDate(a.dateUpdated)}${a.timeUpdated ? ', ' + escapeHtml(a.timeUpdated) : ''}` : '',
+    a.dateCompleted ? `Completed ${fmtDate(a.dateCompleted)}${a.timeCompleted ? ', ' + escapeHtml(a.timeCompleted) : ''}${lateNote(a)}` : ''
+  ].filter(Boolean).join(' · ');
   return `
-    <div class="entry" id="task-${a.id}">
-      <div class="entry-top">
-        <div>
-          <span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${scopeTag(owner, ctx)}
-          <span class="entry-text rich-text">${formatText(a.description || '')}</span>
-        </div>
-        ${EDITOR ? `<div class="cert-actions">
-          ${status !== 'Complete'
-            ? actionBtn('check', 'Complete', `markTaskComplete('${owner.id}', '${a.id}')`, {cls: 'ok'})
-            : actionBtn('reopen', 'Reopen', `reopenTask('${owner.id}', '${a.id}')`)}
-          ${actionBtn('edit', 'Edit', `openTaskModal('${ctx.id}', '${owner.id}', '${a.id}')`)}
-          ${actionBtn('trash', 'Delete', `deleteTask('${owner.id}', '${a.id}')`, {cls: 'danger'})}
-        </div>` : ''}
-      </div>
-      <div class="entry-meta">
-        Entered ${fmtDate(a.dateCreated)}${a.timeCreated ? ', ' + escapeHtml(a.timeCreated) : ''}
-        ${a.dateDue ? ` · Due ${fmtDate(a.dateDue)}${over ? ' <span class="pill pill-overdue">Overdue</span>' : ''}` : ''}
-        ${a.dateUpdated && a.dateUpdated !== a.dateCreated ? ` · Updated ${fmtDate(a.dateUpdated)}${a.timeUpdated ? ', ' + escapeHtml(a.timeUpdated) : ''}` : ''}
-        ${status === 'Waiting' && a.waitingSince ? ` · Waiting since ${fmtDate(a.waitingSince)}` : ''}
-        ${a.dateCompleted ? ` · Completed ${fmtDate(a.dateCompleted)}${a.timeCompleted ? ', ' + escapeHtml(a.timeCompleted) : ''}${lateNote(a)}` : ''}
-      </div>
-      ${renderComments(owner, a)}
-    </div>`;
+    <tr class="task-row${open ? ' open' : ''}${done ? ' done' : ''}" id="task-${a.id}" onclick="toggleTaskRow('${a.id}')" aria-expanded="${open}">
+      <td class="tc-chev">${ICON.chevron}</td>
+      <td class="tc-ref">${a.ref ? escapeHtml(a.ref) : '<span class="muted">—</span>'}</td>
+      <td class="tc-title" title="${escapeHtml(taskTitle(a))}">${scopeTag(owner, ctx)}${escapeHtml(taskTitle(a))}</td>
+      <td class="tc-due">${taskDueCell(a)}</td>
+      <td class="tc-cm${n ? '' : ' muted'}" title="${countLabel(n, 'comment', 'comments')}">${n}</td>
+      ${EDITOR ? `<td class="tc-act">${btn}</td>` : ''}
+    </tr>
+    ${open ? `<tr class="task-more"><td class="tc-chev"></td><td colspan="${EDITOR ? 5 : 4}">
+      ${a.details ? `<div class="task-details rich-text">${formatText(a.details)}</div>` : ''}
+      <div class="entry-meta">${meta}</div>
+      ${renderActivity(owner, a)}
+      ${EDITOR ? `<div class="task-actions">
+        ${actionBtn('edit', 'Edit', `openTaskModal('${ctx.id}', '${owner.id}', '${a.id}')`, {compact: false})}
+        ${actionBtn('reopen', 'Change status', `openStatusModal('${owner.id}', '${a.id}')`, {compact: false})}
+        ${actionBtn('trash', 'Delete', `deleteTask('${owner.id}', '${a.id}')`, {cls: 'danger', compact: false})}
+      </div>` : ''}
+    </td></tr>` : ''}`;
 }
 
 function renderTasksSection(ctx){
   const groups = taskGroups(ctx);
   const any = tasksAnyOpen(ctx);
-  const toggle = groups.length ? `<button class="act-toggle-all" type="button" onclick="toggleAllTasks('${ctx.id}')" title="${any ? 'Collapse' : 'Expand'} all tasks">${any ? ICON.collapseAll : ICON.expandAll}<span>${any ? 'Collapse all' : 'Expand all'}</span></button>` : '';
-  const body = groups.length ? '<div class="task-groups">' + groups.map((g, gi) => {
+  const toggle = groups.length ? `<button class="act-toggle-all" type="button" onclick="toggleAllTasks('${ctx.id}')">${any ? ICON.collapseAll : ICON.expandAll}<span>${any ? 'Collapse all' : 'Expand all'}</span></button>` : '';
+  const cols = `<colgroup><col class="tw-chev"><col class="tw-ref"><col><col class="tw-due"><col class="tw-cm">${EDITOR ? '<col class="tw-act">' : ''}</colgroup>`;
+  const head = `<thead><tr><th></th><th>Ref</th><th>Task</th><th>Due / status</th><th title="Comments">${ICON.comment}</th>${EDITOR ? '<th></th>' : ''}</tr></thead>`;
+  const body = groups.length ? groups.map(g => {
     const done = g.status === 'Complete';
     const n = g.items.length;
     const overdue = done ? 0 : g.items.filter(x => isTaskOverdue(x.item)).length;
     const nextDue = g.items.map(x => x.item.dateDue).filter(Boolean).sort()[0];
-    const dateNote = done ? (g.items[0].item.dateCompleted ? `Latest ${fmtDate(g.items[0].item.dateCompleted)}` : '') : (nextDue ? `Next due ${fmtDate(nextDue)}` : 'No due dates');
-    const open = openTaskGroups.has(taskGroupKey(ctx.id, g.status));
-    const bodyId = `grp-${ctx.id}-${gi}`;
+    const latest = g.items.map(x => x.item.dateCompleted).filter(Boolean).sort().pop();
+    const note = [done ? (latest ? `Latest ${fmtDate(latest)}` : '') : (nextDue ? `Next due ${fmtDate(nextDue)}` : 'No due dates'),
+      overdue ? `<span class="c-rust">${overdue} overdue</span>` : ''].filter(Boolean).join(' · ');
+    const open = !closedTaskGroups.has(taskGroupKey(ctx.id, g.status));
     return `
-      <button class="task-group" type="button" aria-expanded="${open}" aria-controls="${bodyId}" onclick="toggleTaskGroup('${ctx.id}', '${g.status}')">${ICON.chevron}<span class="pill pill-${taskStatusClass(g.status)}">${done ? 'Completed' : escapeHtml(g.status)}</span><span class="task-group-count">${countLabel(n, 'task', 'tasks')}</span>${overdue ? `<span class="pill pill-overdue">${overdue} overdue</span>` : ''}<span class="task-group-date">${dateNote}</span></button>
-      ${open ? `<div class="task-group-body" id="${bodyId}">${g.items.map(x => renderTaskEntry(x, ctx)).join('')}</div>` : ''}`;
-  }).join('') + '</div>' : '<div class="entry-empty">No tasks yet</div>';
+      <div class="task-frame">
+        <button class="task-frame-head" type="button" aria-expanded="${open}" onclick="toggleTaskGroup('${ctx.id}', '${g.status}')">${ICON.chevron}${statusPill(g.status)}<span class="task-frame-count">${countLabel(n, 'task', 'tasks')}</span><span class="task-frame-note">${note}</span></button>
+        ${open ? `<table class="task-table${done ? ' done' : ''}">${cols}${head}<tbody>${g.items.map(x => renderTaskRow(x, ctx)).join('')}</tbody></table>` : ''}
+      </div>`;
+  }).join('') : '<div class="entry-empty">No tasks yet</div>';
   return `
     <div class="changelog">
-      <div class="fk section-head"><span>Tasks</span><span class="section-tools">${toggle}${EDITOR ? actionBtn('plus', 'Add', `openTaskModal('${ctx.id}')`, {compact: false}) : ''}</span></div>
+      <div class="section-head"><span>Tasks</span><span class="section-tools">${toggle}${EDITOR ? actionBtn('plus', 'Add', `openTaskModal('${ctx.id}')`, {compact: false}) : ''}</span></div>
       ${body}
     </div>`;
 }
 
-// ---- Task comments: a running thread on each task (comments: [{id, text, date, time}], oldest first) ----
+// Unsent comment text (kept while the page is open).
 const commentDrafts = {};
-
-function renderComments(owner, a){
-  const list = arr(a.comments);
-  const n = list.length;
-  const open = openThreads.has(a.id);
-  const key = owner.id + '|' + a.id;
-  let thread = '';
-  if(open){
-    const items = n ? list.map(cm => `
-        <div class="comment">
-          <div class="comment-body">
-            <div class="comment-text rich-text">${formatText(cm.text)}</div>
-            <div class="comment-stamp">${fmtDate(cm.date)}${cm.time ? ', ' + escapeHtml(cm.time) : ''}</div>
-          </div>
-          ${EDITOR ? `<button class="comment-del" type="button" title="Delete comment" aria-label="Delete comment" onclick="deleteComment('${owner.id}', '${a.id}', '${cm.id}')">${ICON.x}</button>` : ''}
-        </div>`).join('') : '<div class="comment-empty">No comments yet</div>';
-    const form = EDITOR ? `
-        <div class="comment-add">
-          <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment('${owner.id}', '${a.id}'); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
-          <button class="btn-primary" type="button" onclick="addComment('${owner.id}', '${a.id}')">Add</button>
-        </div>
-        <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>` : '';
-    thread = `<div class="comment-thread" id="thread-${a.id}"><div class="comment-list">${items}</div>${form}</div>`;
-  }
-  return `
-      <button class="comments-toggle" type="button" aria-expanded="${open}" aria-controls="thread-${a.id}" onclick="toggleComments('${a.id}')">${ICON.chevron}Comments <span class="${n ? '' : 'cc-zero'}">(${n})</span></button>
-      ${thread}`;
-}
-
-function toggleComments(taskId){
-  if(openThreads.has(taskId)) openThreads.delete(taskId); else openThreads.add(taskId);
-  render();
-  if(openThreads.has(taskId)){
-    const box = document.getElementById('cmt-' + taskId);
-    if(box) box.focus({preventScroll: true});
-  }
-}
 
 // =====================================================================
 // CSV export (3.2): one row per project. The view-only page leaves out contact email and street address.

@@ -6,7 +6,7 @@ let ghConfig = null;
 let saving = false;
 let localVersion = 0;
 let addingComment = false;
-let pendingConversion = null;   // a v3 file read but not yet converted and saved (see load)
+let pendingConversion = null;   // an older file read but not yet converted and saved (see load)
 
 const $ = id => document.getElementById(id);
 const val = id => $(id).value.trim();
@@ -165,7 +165,7 @@ async function load(){
     }else{
       const r = readData(raw);
       setData(r.data);
-      if(r.converted){ pendingConversion = {raw, report: r.report}; hideBanner(); openConversion(); }
+      if(r.converted){ pendingConversion = {raw, report: r.report, from: r.from}; hideBanner(); openConversion(); }
       else hideBanner();
     }
   }catch(e){
@@ -177,10 +177,14 @@ async function load(){
 }
 
 function openConversion(){
-  const r = pendingConversion.report;
-  const shared = r.devices.filter(d => d.projects > 1);
+  const rep = pendingConversion.report;
   const fieldNames = {customer: 'Customer', serial: 'SN', simModel: 'SIM model', simLocation: 'SIM location', contactName: 'Contact name', contactEmail: 'Contact email', docLocation: 'Document location'};
-  $('cv-body').innerHTML = `
+  let html = '';
+  const r = rep.devices;
+  if(r){
+    const shared = r.devices.filter(d => d.projects > 1);
+    html += `
+    <h4 class="cv-head">Devices and projects</h4>
     <p>Each simulator (customer and SN) becomes a <b>device</b>, with one <b>project</b> per aircraft certification on it. Authority, country and level stay with each project, since one device can be certified under different authorities.</p>
     <ul class="cv-list">
       <li>${countLabel(r.projects, 'project', 'projects')} on ${countLabel(r.devices.length, 'device', 'devices')}${shared.length ? `; ${countLabel(shared.length, 'device has', 'devices have')} more than one aircraft:` : '.'}
@@ -188,15 +192,34 @@ function openConversion(){
       ${r.merged.tasks + r.merged.docs + r.merged.history ? `<li>Moved to the device because they were identical on every aircraft: ${[countLabel(r.merged.tasks, 'task', 'tasks'), countLabel(r.merged.docs, 'document', 'documents'), countLabel(r.merged.history, 'history entry', 'history entries')].join(', ')}.</li>` : ''}
       ${r.conflicts.length ? `<li>Device details that differed between aircraft (the first value is kept; check these after converting):<ul>${r.conflicts.map(c => `<li>${escapeHtml(c.device)}: ${fieldNames[c.field] || c.field} kept “${escapeHtml(c.kept)}”, not ${c.other.map(o => '“' + escapeHtml(o) + '”').join(', ')}</li>`).join('')}</ul></li>` : ''}
       ${r.fixes ? `<li>${countLabel(r.fixes, 'older entry', 'older entries')} tidied into the current format.</li>` : ''}
-    </ul>
-    <p class="muted">A copy of the current file is saved first, to ${escapeHtml(backupPath())}. Older versions also stay in Version history.</p>`;
+    </ul>`;
+  }
+  const t = rep.tasks;
+  if(t){
+    // Grouped by where each task lives, in the order the Projects page shows them.
+    const label = o => isDevice(o) ? `${customerKey(o)} / SN ${o.serial || '—'} / all aircraft` : `${customerKey(o)} / SN ${o.serial || '—'} / ${shortProjectLabel(o)}`;
+    const groups = new Map();
+    t.forEach(x => { const k = label(x.owner); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(x.task); });
+    const withRef = t.filter(x => x.task.ref).length, withDetails = t.filter(x => x.task.details).length;
+    html += `
+    <h4 class="cv-head">Tasks: reference, title and details</h4>
+    <p>Each task's description is split into an optional <b>reference</b> (an item number such as 6.1.B.1), a <b>title</b> and optional <b>details</b>. ${countLabel(t.length, 'task', 'tasks')}: ${withRef} with a reference, ${withDetails} with details. Long titles can be shortened later with Edit. Each task's Activity starts from its recorded dates.</p>
+    <div class="cv-tasks">${[...groups.entries()].sort((a, b) => textCmp(a[0], b[0])).map(([k, list]) => `
+      <div class="cv-owner">${escapeHtml(k)}</div>
+      <table class="cv-table"><colgroup><col class="tw-ref"><col><col></colgroup>
+        <thead><tr><th>Ref</th><th>Title</th><th>Details</th></tr></thead>
+        <tbody>${list.sort((a, b) => taskSortCmp({item: a}, {item: b})).map(x => `<tr><td class="tc-ref">${escapeHtml(x.ref) || '<span class="muted">—</span>'}</td><td>${escapeHtml(x.title)}</td><td class="muted">${escapeHtml(plainSnippet(x.details, 120)) || '—'}</td></tr>`).join('')}</tbody>
+      </table>`).join('')}</div>`;
+  }
+  html += `<p class="muted">A copy of the current file is saved first, to ${escapeHtml(backupPath())}. Older versions also stay in Version history.</p>`;
+  $('cv-body').innerHTML = html;
   hideErr('cv-err');
   $('cv-save').disabled = false;
   openModalEl('convert-modal-bg', 'cv-save');
 }
 
 function backupPath(){
-  return ghConfig.path.replace(/[^/]*$/, '') + `backups/certifications-v3-${today()}.json`;
+  return ghConfig.path.replace(/[^/]*$/, '') + `backups/certifications-v${pendingConversion.from}-${today()}.json`;
 }
 
 async function confirmConversion(){
@@ -206,13 +229,13 @@ async function confirmConversion(){
   saving = true;
   try{
     const path = backupPath();
-    await ghWriteFile(path, JSON.stringify(pendingConversion.raw, null, 2) + '\n', await ghFileSha(path), 'Backup before converting to devices and projects');
+    await ghWriteFile(path, JSON.stringify(pendingConversion.raw, null, 2) + '\n', await ghFileSha(path), 'Backup before updating the data format');
     projects.filter(p => p.completed && !qual(p).basisDocId && !qual(p).basisRevision).forEach(lockRegulation);
-    await writeData('Convert tracker data to devices and projects (v3.2.0)');
+    await writeData(pendingConversion.report.devices ? 'Convert tracker data to devices and projects (v3.2.1)' : 'Split tasks into reference, title and details (v3.2.1)');
     pendingConversion = null;
     closeModalEl('convert-modal-bg');
     broadcastSaved();
-    showBanner('success', `Converted: ${countLabel(projects.length, 'project', 'projects')} on ${countLabel(devices.length, 'device', 'devices')}. Backup saved to ${escapeHtml(path)}.`);
+    showBanner('success', `Data updated. Backup saved to ${escapeHtml(path)}.`);
     setTimeout(hideBanner, 6000);
     render();
   }catch(e){
@@ -491,88 +514,128 @@ const findIn = (owner, key, id) => owner ? arr(owner[key]).find(x => x.id === id
 // =====================================================================
 // Tasks and comments
 // =====================================================================
-let taskForm = {ctxId: '', ownerId: '', taskId: ''};
+let taskForm = {ctxId: '', ownerId: '', taskId: '', status: ''};
 
+// Add Task sets the starting status. On an existing task the status can change here too; that needs a reason
+// (optional only when completing), recorded in the task's Activity like any other status change.
 function openTaskModal(ctxId, ownerId, taskId){
   const ctx = ownerById(ctxId);
   if(!ctx) return;
   const owner = ownerId ? ownerById(ownerId) : ctx;
   const a = taskId ? findIn(owner, 'tasks', taskId) : null;
-  taskForm = {ctxId, ownerId: owner.id, taskId: a ? a.id : ''};
+  taskForm = {ctxId, ownerId: owner.id, taskId: a ? a.id : '', status: a ? taskGroupOf(a) : ''};
   $('task-modal-title').textContent = a ? 'Edit Task' : 'Add Task';
-  $('a-description').value = a ? a.description || '' : '';
+  $('a-ref').value = a ? a.ref || '' : '';
+  $('a-title').value = a ? taskTitle(a) : '';
+  $('a-details').value = a ? a.details || '' : '';
   $('a-status').value = a ? taskGroupOf(a) : 'Not Started';
   $('a-due').value = a ? a.dateDue || '' : '';
+  $('a-reason').value = '';
+  refreshTaskReason();
   fillScope('a', ctx, owner);
   hideErr('task-err');
-  openModalEl('task-modal-bg', 'a-description');
+  openModalEl('task-modal-bg', a ? 'a-title' : 'a-ref');
+}
+
+// The reason box appears when an existing task's status is changed in the form.
+function refreshTaskReason(){
+  const changed = !!taskForm.taskId && $('a-status').value !== taskForm.status;
+  $('a-reason-field').hidden = !changed;
+  $('a-reason-label').textContent = $('a-status').value === 'Complete' ? 'Why is it changing? (optional when completing)' : 'Why is the status changing?';
+}
+$('a-status').addEventListener('change', refreshTaskReason);
+
+// Records a status change in the task's log and updates its dates.
+function applyStatusChange(a, to, reason){
+  const from = taskGroupOf(a);
+  if(from === to) return false;
+  const d = today(), t = nowTime();
+  a.log = [...arr(a.log), {id: newId('s'), date: d, time: t, ts: Date.now(), from, to, reason}];
+  a.status = to;
+  a.waitingSince = to === 'Waiting' ? d : '';
+  if(to === 'Complete'){ a.dateCompleted = d; a.timeCompleted = t; }
+  else{ a.dateCompleted = ''; a.timeCompleted = ''; }
+  a.dateUpdated = d; a.timeUpdated = t;
+  return true;
 }
 
 async function saveTask(){
-  const description = val('a-description');
-  if(!description) return showErr('task-err', 'Enter a description.');
+  const ref = val('a-ref'), title = val('a-title'), details = val('a-details');
+  if(!title) return showErr('task-err', 'Enter a title.');
+  const status = $('a-status').value || 'Not Started';
+  const reason = val('a-reason');
+  if(taskForm.taskId && status !== taskForm.status && status !== 'Complete' && !reason) return showErr('task-err', 'Enter why the status is changing.');
   const oldOwner = ownerById(taskForm.ownerId);
   const newOwner = ownerById($('a-scope').value) || oldOwner;
-  const status = $('a-status').value || 'Not Started';
   const dateDue = isoDate($('a-due').value);
   const d = today(), t = nowTime();
   let a = taskForm.taskId ? findIn(oldOwner, 'tasks', taskForm.taskId) : null;
   if(a){
-    let dateCompleted = a.dateCompleted || '', timeCompleted = a.timeCompleted || '';
-    if(status === 'Complete' && !dateCompleted){ dateCompleted = d; timeCompleted = t; }
-    if(status !== 'Complete'){ dateCompleted = ''; timeCompleted = ''; }
-    const comments = arr(a.comments).slice();
-    if(a.status === 'Complete' && status !== 'Complete'){ const note = reopenNote(a); if(note) comments.push(note); }
-    // Waiting since: the day a task was set to Waiting (kept while it stays Waiting).
-    const waitingSince = status === 'Waiting' ? (a.status === 'Waiting' && a.waitingSince ? a.waitingSince : d) : '';
-    Object.assign(a, {description, status, dateDue, waitingSince, dateUpdated: d, timeUpdated: t, dateCompleted, timeCompleted, comments});
+    Object.assign(a, {ref, title, details, dateDue, dateUpdated: d, timeUpdated: t});
+    delete a.description;
+    applyStatusChange(a, status, reason);
   }else{
-    a = {id: newId('a'), description, status, dateDue, waitingSince: status === 'Waiting' ? d : '', dateCreated: d, timeCreated: t, dateUpdated: d, timeUpdated: t,
-      dateCompleted: status === 'Complete' ? d : '', timeCompleted: status === 'Complete' ? t : ''};
+    a = {id: newId('a'), ref, title, details, status, dateDue, waitingSince: status === 'Waiting' ? d : '', dateCreated: d, timeCreated: t, dateUpdated: d, timeUpdated: t,
+      dateCompleted: status === 'Complete' ? d : '', timeCompleted: status === 'Complete' ? t : '', comments: [],
+      log: [{id: newId('s'), kind: 'entered', date: d, time: t, ts: Date.now(), to: status}]};
   }
   placeItem('tasks', a, oldOwner, newOwner);
-  // Open the group the task is now in (except Completed, which stays folded away).
-  if(status !== 'Complete') openTaskGroups.add(taskGroupKey(taskForm.ctxId, taskStatusLabel(status)));
+  closedTaskGroups.delete(taskGroupKey(taskForm.ctxId, taskGroupOf(a)));
   closeModalEl('task-modal-bg');
-  await persist('Task: ' + plainSnippet(description, 60));
+  await persist('Task: ' + plainSnippet(taskLabel(a), 60));
   render();
 }
 $('task-save-btn').addEventListener('click', saveTask);
 
-// Reopening a completed task adds an automatic comment so the earlier completion isn't lost.
-function reopenNote(a){
-  if(!a.dateCompleted) return null;
-  return {id: newId('k'), text: `Reopened (was completed ${fmtDate(a.dateCompleted)})`, date: today(), time: nowTime()};
-}
+// ---- Change status (also the row's Complete and Reopen buttons): asks why; optional only when completing ----
+let statusForm = {ownerId: '', taskId: ''};
 
-async function reopenTask(ownerId, taskId){
+function openStatusModal(ownerId, taskId, preset){
   const a = findIn(ownerById(ownerId), 'tasks', taskId);
   if(!a) return;
-  const note = reopenNote(a);
-  if(note) a.comments = [...arr(a.comments), note];
-  Object.assign(a, {status: 'In Progress', waitingSince: '', dateUpdated: today(), timeUpdated: nowTime(), dateCompleted: '', timeCompleted: ''});
-  const ctxId = view.type === 'device' || view.type === 'project' ? view.id : ownerId;
-  openTaskGroups.add(taskGroupKey(ctxId, 'In Progress'));
-  await persist('Task reopened: ' + plainSnippet(a.description, 60));
-  render();
+  statusForm = {ownerId, taskId};
+  const from = taskGroupOf(a);
+  $('st-task').innerHTML = `${a.ref ? `<span class="tc-ref">${escapeHtml(a.ref)}</span> ` : ''}${escapeHtml(taskTitle(a))}`;
+  $('st-from').innerHTML = statusPill(from);
+  const options = TASK_GROUPS.filter(s => s !== from);
+  $('st-to').innerHTML = options.map(s => `<option value="${s}">${s === 'Complete' ? 'Completed' : s}</option>`).join('');
+  $('st-to').value = preset && options.includes(preset) ? preset : options[0];
+  $('st-reason').value = '';
+  refreshStatusReason();
+  hideErr('st-err');
+  openModalEl('status-modal-bg', 'st-reason');
 }
 
-async function markTaskComplete(ownerId, taskId){
-  const a = findIn(ownerById(ownerId), 'tasks', taskId);
-  if(!a) return;
-  const d = today(), t = nowTime();
-  Object.assign(a, {status: 'Complete', waitingSince: '', dateUpdated: d, timeUpdated: t, dateCompleted: d, timeCompleted: t});
-  await persist('Task complete: ' + plainSnippet(a.description, 60));
+function refreshStatusReason(){
+  const completing = $('st-to').value === 'Complete';
+  $('st-reason-label').textContent = completing ? 'Why is it changing? (optional when completing)' : 'Why is it changing?';
+  $('st-save').textContent = completing ? 'Mark completed' : 'Save change';
+}
+$('st-to').addEventListener('change', refreshStatusReason);
+$('st-reason').addEventListener('input', () => hideErr('st-err'));
+
+async function saveStatusChange(){
+  const a = findIn(ownerById(statusForm.ownerId), 'tasks', statusForm.taskId);
+  if(!a) return closeModalEl('status-modal-bg');
+  const to = $('st-to').value, reason = val('st-reason');
+  if(to !== 'Complete' && !reason) return showErr('st-err', 'Enter why the status is changing.');
+  applyStatusChange(a, to, reason);
+  const ctxId = view.type === 'device' || view.type === 'project' ? view.id : statusForm.ownerId;
+  closedTaskGroups.delete(taskGroupKey(ctxId, to));
+  closeModalEl('status-modal-bg');
+  await persist(`Task ${to === 'Complete' ? 'completed' : 'status ' + to}: ` + plainSnippet(taskLabel(a), 60));
   render();
 }
+$('st-save').addEventListener('click', saveStatusChange);
 
 function deleteTask(ownerId, taskId){
   const owner = ownerById(ownerId);
   const a = findIn(owner, 'tasks', taskId);
   if(!a) return;
-  confirmAction('Delete this task?', `<p class="confirm-name">${escapeHtml(plainSnippet(a.description, 200))}</p>${arr(a.comments).length ? `<p>This also deletes its ${countLabel(a.comments.length, 'comment', 'comments')}.</p>` : ''}`, 'Delete task', async () => {
+  confirmAction('Delete this task?', `<p class="confirm-name">${escapeHtml(plainSnippet(taskLabel(a), 200))}</p>${arr(a.comments).length ? `<p>This also deletes its ${countLabel(a.comments.length, 'comment', 'comments')} and status history.</p>` : ''}`, 'Delete task', async () => {
     owner.tasks = owner.tasks.filter(x => x !== a);
-    await persist('Delete task: ' + plainSnippet(a.description, 60));
+    openTasks.delete(a.id);
+    await persist('Delete task: ' + plainSnippet(taskLabel(a), 60));
     render();
   });
 }
@@ -584,11 +647,11 @@ async function addComment(ownerId, taskId){
   if(!text){ const err = $('cmt-err-' + taskId); if(err) err.style.display = 'block'; return; }
   const a = findIn(ownerById(ownerId), 'tasks', taskId);
   if(!a) return;
-  a.comments = [...arr(a.comments), {id: newId('k'), text, date: today(), time: nowTime()}];
+  a.comments = [...arr(a.comments), {id: 'k' + Date.now(), text, date: today(), time: nowTime()}];
   delete commentDrafts[ownerId + '|' + taskId];
-  openThreads.add(taskId);
+  openTasks.add(taskId);
   addingComment = true;
-  try{ await persist('Comment on task: ' + plainSnippet(a.description, 60)); }finally{ addingComment = false; }
+  try{ await persist('Comment on task: ' + plainSnippet(taskLabel(a), 60)); }finally{ addingComment = false; }
   render();
 }
 

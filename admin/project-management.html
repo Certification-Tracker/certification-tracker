@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.2.0">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.2.1">
 </head>
 <body>
 <div class="wrap">
@@ -30,7 +30,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.0</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.1</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <!-- Device: Add customer / Add device / Edit device -->
@@ -175,10 +175,19 @@
 <div class="modal-bg" id="task-modal-bg">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
     <h3 id="task-modal-title">Add Task</h3>
+    <div class="field-row">
+      <div class="field field-ref">
+        <label for="a-ref">Reference (optional)</label>
+        <input id="a-ref" placeholder="6.1.B.1">
+      </div>
+      <div class="field">
+        <label for="a-title">Title</label>
+        <input id="a-title" placeholder="What needs to happen">
+      </div>
+    </div>
     <div class="field">
-      <label for="a-description">Description</label>
-      <textarea id="a-description" placeholder="What needs to happen"></textarea>
-      <div class="err" id="task-err"></div>
+      <label for="a-details">Details (optional)</label>
+      <textarea id="a-details" rows="3" placeholder="Background, findings, what the authority asked for"></textarea>
     </div>
     <div class="field-row">
       <div class="field">
@@ -187,7 +196,7 @@
           <option value="Not Started">Not Started</option>
           <option value="In Progress">In Progress</option>
           <option value="Waiting">Waiting</option>
-          <option value="Complete">Complete</option>
+          <option value="Complete">Completed</option>
         </select>
       </div>
       <div class="field">
@@ -195,13 +204,36 @@
         <input id="a-due" type="date">
       </div>
     </div>
+    <div class="field" id="a-reason-field" hidden>
+      <label for="a-reason" id="a-reason-label">Why is the status changing?</label>
+      <textarea id="a-reason" rows="2"></textarea>
+    </div>
     <div class="field" id="a-scope-field" hidden>
       <label for="a-scope">Applies to</label>
       <select id="a-scope"></select>
     </div>
+    <div class="err" id="task-err"></div>
     <div class="modal-actions">
       <button type="button" data-close>Cancel</button>
       <button class="btn-primary" id="task-save-btn" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change a task's status (3.2.1): every change is logged with its reason -->
+<div class="modal-bg" id="status-modal-bg">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="st-title">
+    <h3 id="st-title">Change status</h3>
+    <p class="modal-intro" id="st-task"></p>
+    <div class="st-change"><span id="st-from"></span><span class="act-arrow">&rarr;</span><select id="st-to" aria-label="New status"></select></div>
+    <div class="field">
+      <label for="st-reason" id="st-reason-label">Why is it changing?</label>
+      <textarea id="st-reason" rows="3"></textarea>
+    </div>
+    <div class="err" id="st-err"></div>
+    <div class="modal-actions">
+      <button type="button" data-close>Cancel</button>
+      <button class="btn-primary" id="st-save" type="button">Save change</button>
     </div>
   </div>
 </div>
@@ -365,7 +397,7 @@
 <!-- One-time conversion to devices and projects (3.2) -->
 <div class="modal-bg" id="convert-modal-bg" data-sticky="1">
   <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="cv-title">
-    <h3 id="cv-title">Update the data to devices and projects</h3>
+    <h3 id="cv-title">Update the data format</h3>
     <div id="cv-body" class="cv-body"></div>
     <div class="err" id="cv-err"></div>
     <div class="modal-actions">
@@ -442,9 +474,9 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.2.0"></script>
-<script src="../assets/projects.js?v=3.2.0"></script>
-<script src="../assets/atd.js?v=3.2.0"></script>
-<script src="../assets/editor.js?v=3.2.0"></script>
+<script src="../assets/tracker.js?v=3.2.1"></script>
+<script src="../assets/projects.js?v=3.2.1"></script>
+<script src="../assets/atd.js?v=3.2.1"></script>
+<script src="../assets/editor.js?v=3.2.1"></script>
 </body>
 </html>

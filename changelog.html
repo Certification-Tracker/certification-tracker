@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.2.0">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.1">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,26 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.2.1">
+        <h2 class="vh"><span class="vn">v3.2.1</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>Tasks are laid out as a table in a frame for each status (Not Started, In Progress, Waiting, Completed), with columns for reference, task, due date or status, and comment count. Click a group's bar to fold it; Collapse all folds every group and closes every task.</li>
+          <li>Each task shows only its reference and title until clicked; clicking opens its details, dates and Activity, with Edit, Change status and Delete in the editor.</li>
+          <li>Tasks have a separate reference (optional, such as a UK CAA item number), title and details (optional). Existing tasks were split automatically: a leading item number became the reference, and the first line or first sentence of a long description became the title, with the rest in details. The editor shows every split before saving it, with a backup of the old file.</li>
+          <li>Each status group sorts by reference in natural order (6.1.C.9 before 6.1.C.10), then tasks without a reference by due date and date entered.</li>
+          <li>Complete and Reopen buttons sit on each task's row. Reopening a completed task returns it to Not Started.</li>
+          <li>Section headings (Qualification, Documents, Tasks) are back to their full size.</li>
+          <li>On phones, each task's row stacks its reference and title above its status and buttons.</li>
+        </ul>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>Status change log: every change of a task's status asks why it changed, and records the old and new status, date, time and reason. The reason is optional only when completing a task, and required for every other change, including reopening.</li>
+          <li>Activity on each task lists its status changes and comments together, oldest first. Existing tasks start it with their recorded dates (entered, waiting since and completed), marked as recorded before 3.2.1.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.2.0">
-        <h2 class="vh"><span class="vn">v3.2.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.2.0</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>Devices and projects: each simulator (customer and SN) is now a device, with one project per aircraft certification on it. The device holds the customer, SN, SIM model, location, contact and document location; each project holds its own authority, country, level, aircraft, due date and qualification, since one device can be certified under different authorities over time.</li>
@@ -155,7 +173,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.2.0</div>
+  <div class="version-footer">v3.2.1</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

@@ -5,7 +5,7 @@
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.2.0';
+const VERSION = 'v3.2.1';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
@@ -28,10 +28,12 @@ const QUAL_STATUSES = ['Pending', 'Conditional', 'Qualified', 'Expired', 'Withdr
 //            and the documents, tasks and document history that apply to every aircraft on it.
 //   project: one aircraft certification on a device: deviceId, authority, country, level, aircraft, date,
 //            qualification, completed, and its own documents, tasks and document history.
+//   task (3.2.1, schemaVersion 5): ref (optional item number, e.g. 6.1.B.1), title, details (optional), status,
+//            dates, comments, and log: every status change with its reason ({date, time, ts, from, to, reason}).
 // A project also answers for its device's fields (p.customer, p.serial ...) through read-only getters
 // that are never saved with the project.
 // =====================================================================
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const DEVICE_FIELDS = ['customer', 'serial', 'simModel', 'simLocation', 'contactName', 'contactEmail', 'docLocation'];
 
 let devices = [];
@@ -92,14 +94,67 @@ function normalizeV4(raw){
   return {devices: devs, projects: projs};
 }
 
-// Any saved file -> {data, converted, report}. v3 files (and v2 lists) are converted in memory;
-// the editor saves the converted file after showing what changes (editor.js).
+// Any saved file -> {data, converted, report, from}. Older files are converted in memory: v3 (and v2 lists)
+// to devices and projects, and (3.2.1) task descriptions to reference, title and details. The editor saves
+// the converted file after showing what changes (editor.js).
 function readData(raw){
-  if(isV4(raw)) return {data: normalizeV4(raw), converted: false};
-  const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.certifications) ? raw.certifications : []);
-  const out = convertToV4(list);
-  return {data: out.data, converted: true, report: out.report};
+  const from = isV4(raw) ? raw.schemaVersion : (raw && raw.schemaVersion) || 2;
+  const report = {};
+  let data;
+  if(isV4(raw)) data = normalizeV4(raw);
+  else{
+    const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.certifications) ? raw.certifications : []);
+    const out = convertToV4(list);
+    data = out.data;
+    report.devices = out.report;
+  }
+  const split = upgradeTasks(data);
+  if(split.length) report.tasks = split;
+  return {data, converted: !!(report.devices || report.tasks), report, from};
 }
+
+// ---- 3.2.1: a task's description becomes reference, title and details ----
+// "6.1.B.1 - text" -> reference 6.1.B.1. Then: the first line is the title if there's a line break; a short
+// description (up to 90 characters) is all title; otherwise the first sentence is the title. The rest is details.
+function splitDescription(desc){
+  let t = String(desc || '').replace(/\r\n?/g, '\n').trim(), ref = '';
+  const m = t.match(/^(\d+(?:\.[0-9A-Za-z]+)+)\s*[-\u2013\u2014:]\s*/);
+  if(m){ ref = m[1]; t = t.slice(m[0].length).trim(); }
+  const nl = t.indexOf('\n');
+  if(nl > -1) return {ref, title: t.slice(0, nl).trim(), details: t.slice(nl + 1).trim()};
+  if(t.length <= 90) return {ref, title: t, details: ''};
+  const s1 = t.match(/^(.+?[.!?])\s+([\s\S]+)$/);
+  return s1 ? {ref, title: s1[1].trim(), details: s1[2].trim()} : {ref, title: t, details: ''};
+}
+
+// Tasks from before 3.2.1 have no log; their recorded dates start it (marked as recorded before 3.2.1).
+function seedTaskLog(t){
+  const log = [{id: t.id + '-e', kind: 'entered', date: t.dateCreated || '', time: t.timeCreated || '', ts: 0}];
+  if(t.waitingSince && taskGroupOf(t) === 'Waiting') log.push({id: t.id + '-w', to: 'Waiting', date: t.waitingSince, time: '', ts: 1, legacy: true});
+  if(taskGroupOf(t) === 'Complete' && t.dateCompleted) log.push({id: t.id + '-c', to: 'Complete', date: t.dateCompleted, time: t.timeCompleted || '', ts: 2, legacy: true});
+  return log;
+}
+
+// Splits every task that still has only a description; returns what changed, for the editor's preview.
+function upgradeTasks(data){
+  const changed = [];
+  [...data.devices, ...data.projects].forEach(owner => {
+    owner.tasks = arr(owner.tasks).map(t => {
+      if(t.title !== undefined) return {...t, log: arr(t.log), comments: arr(t.comments)};
+      const parts = splitDescription(t.description);
+      const n = {...t, ...parts, title: parts.title || 'Untitled task', comments: arr(t.comments)};
+      delete n.description;
+      n.log = seedTaskLog(n);
+      changed.push({owner, task: n});
+      return n;
+    });
+  });
+  return changed;
+}
+
+// "6.1.B.1 Title" (the title alone when there's no reference). Older tasks still read before conversion.
+function taskTitle(a){ return a.title || a.description || 'Untitled task'; }
+function taskLabel(a){ return [a.ref, taskTitle(a)].filter(Boolean).join(' '); }
 
 function slug(s){
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -248,7 +303,6 @@ function scopeTag(owner, ctx){
 let view = parseHash();
 let navFrom = null;        // the list or search a page was opened from (for "Back to …")
 let pendingFocus = null;   // task to scroll to after the next render
-const openThreads = new Set();     // tasks whose comment thread is open (kept while the page is open)
 
 // Old list names (3.1) still open.
 const LIST_ALIASES = {'certs-': 'proj-', 'act-': 'task-'};
@@ -545,7 +599,7 @@ function renderProjectsHome(){
   open.filter(x => taskGroupOf(x.a) === 'Waiting').forEach(x => (waitingBy[x.c.id] = waitingBy[x.c.id] || []).push(x));
 
   const who = c => escapeHtml(customerKey(c));
-  const taskText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(x.a.description, 90))}`;
+  const taskText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(taskLabel(x.a), 90))}`;
   const taskAction = x => ({type: 'task', ownerId: x.owner.id, taskId: x.a.id});
   const projText = p => `${who(p)} \u00b7 ${escapeHtml(projectName(p))}`;
   const projAction = p => ({type: 'project', id: p.id});
@@ -714,7 +768,7 @@ function listRowHtml(kind, item, from){
   const {c, a} = item;
   const status = taskStatusLabel(a.status);
   return rowButton({type: 'task', ownerId: item.owner.id, taskId: a.id, from},
-    `${ownerLine(c)}<br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${escapeHtml(plainSnippet(a.description, 180))}${status === 'Waiting' && a.waitingSince ? ` <span class="row-sub">\u00b7 Waiting since ${fmtDate(a.waitingSince)}</span>` : ''}`,
+    `${ownerLine(c)}<br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${escapeHtml(plainSnippet(taskLabel(a), 180))}${status === 'Waiting' && a.waitingSince ? ` <span class="row-sub">\u00b7 Waiting since ${fmtDate(a.waitingSince)}</span>` : ''}`,
     dueText(a.dateDue, status === 'Complete' ? a.dateCompleted : '', isTaskOverdue(a)));
 }
 
@@ -728,15 +782,15 @@ function openRow(i){
   if(act.type === 'task') openTask(act.ownerId, act.taskId, act.comment, act.from);
 }
 
-// Opens the page a task is shown on, with its group (and comments, if asked) open and the task highlighted.
+// Opens the page a task is shown on, with its group and the task open, and the task highlighted.
 function openTask(ownerId, taskId, comment, from){
   const owner = ownerById(ownerId);
   const a = owner && arr(owner.tasks).find(x => x.id === taskId);
   if(!a) return;
   let target = owner;
   if(isDevice(owner) && projectsOf(owner.id).length === 1) target = projectsOf(owner.id)[0];
-  openTaskGroups.add(taskGroupKey(target.id, taskGroupOf(a)));
-  if(comment) openThreads.add(a.id);
+  closedTaskGroups.delete(taskGroupKey(target.id, taskGroupOf(a)));
+  openTasks.add(a.id);
   pendingFocus = a.id;
   navigate(ctxView(target), from);
 }
@@ -892,7 +946,8 @@ function projectsUsingDoc(id, openOnly){
 // ---- Tasks: statuses and groups ----
 // Statuses: Not Started, In Progress, Waiting (on another party), Complete.
 const TASK_GROUPS = ['Not Started', 'In Progress', 'Waiting', 'Complete'];
-const openTaskGroups = new Set();   // "<page id>|<status>" groups shown open (kept while the page is open)
+const closedTaskGroups = new Set(); // "<page id>|<status>" groups folded away (kept while the page is open)
+const openTasks = new Set();        // tasks opened to show their details and Activity
 
 function taskStatusLabel(status){ return !status || status === 'Pending' ? 'Not Started' : status; }
 function taskStatusClass(status){ return {Complete: 'sage', 'In Progress': 'gold', Waiting: 'plum'}[status] || 'slate'; }
@@ -1234,7 +1289,7 @@ function searchProjects(t){
 function searchTasks(t){
   const out = [];
   allTasks().forEach(x => {
-    if(textHas(x.a.description, t)) out.push({...x, kind: 'task'});
+    if([x.a.ref, taskTitle(x.a), x.a.details, ...arr(x.a.log).map(e => e.reason)].some(v => textHas(v, t))) out.push({...x, kind: 'task'});
     arr(x.a.comments).forEach(cm => { if(textHas(cm.text, t)) out.push({...x, cm, kind: 'comment'}); });
   });
   return out.sort((x, y) => ownerSortCmp(x.c, y.c) || dateCmp(taskDate(x.a), taskDate(y.a)));
@@ -1305,7 +1360,7 @@ function renderSearchView(){
   if((all || tab === 'tasks') && taskHits.length){
     body += groupHead('tasks', 'Tasks and comments', taskHits.length) + taskHits.slice(0, all ? 3 : undefined).map(x => {
       const status = taskStatusLabel(x.a.status);
-      const text = x.kind === 'comment' ? x.cm.text : x.a.description;
+      const text = x.kind === 'comment' ? x.cm.text : taskLabel(x.a);
       return rowButton({type: 'task', ownerId: x.owner.id, taskId: x.a.id, comment: x.kind === 'comment', from},
         `<span class="row-sub">${escapeHtml(customerKey(x.c))} \u00b7 SN: ${escapeHtml(x.c.serial || '\u2014')}</span><br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${x.kind === 'comment' ? ICON.comment : ''}${highlight(plainSnippet(text, 200), q)}`,
         x.kind === 'comment' ? 'Comment' : 'Task');
