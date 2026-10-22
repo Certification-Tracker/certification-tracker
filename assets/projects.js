@@ -195,7 +195,7 @@ function renderDeviceView(d){
     const st = projectStatus(p);
     const open = openTaskCount(projectTasks(p)).length;
     return rowButton({type: 'project', id: p.id}, `<span class="status-dot dot-${st.cls} inline-dot"></span><b class="row-strong">${escapeHtml(projectName(p))}</b> <span class="row-sub">· ${escapeHtml([p.authority, p.level].filter(Boolean).join(' ') || 'No authority')}</span>`,
-      `<span class="pill pill-${st.cls}">${st.label}</span>${open ? countLabel(open, 'open task', 'open tasks') + ' · ' : ''}${p.completed ? 'Completed ' + fmtDate(p.dateCompleted) : (p.date ? 'Due ' + fmtDate(p.date) : 'No due date')}`);
+      `${projectStatusHtml(p, true)}${open ? countLabel(open, 'open task', 'open tasks') + ' · ' : ''}${p.completed ? 'Completed ' + fmtDate(p.dateCompleted) : (p.date ? 'Due ' + fmtDate(p.date) : 'No due date')}`);
   }).join('');
   return `
     ${navFrom ? '' : backBtn('Projects', 'openProjects()')}
@@ -220,7 +220,6 @@ function renderDeviceView(d){
 function renderProjectView(p){
   if(!p) return renderProjectsView();
   const d = p.device;
-  const status = projectStatus(p);
   const snLink = d ? (multiProject(d.id)
     ? `<button class="text-link" type="button" onclick="openDevice('${d.id}')">SN ${escapeHtml(d.serial || '—')}</button>`
     : 'SN ' + escapeHtml(d.serial || '—')) : '';
@@ -232,18 +231,44 @@ function renderProjectView(p){
         <h2 class="detail-title">${escapeHtml(projectName(p))}</h2>
         ${p.completed ? `<div class="detail-completed">Completed ${fmtDate(p.dateCompleted)}</div>` : ''}
       </div>
-      <span class="pill pill-${status.cls}">${status.label}</span>
+      <span class="detail-status">${projectStatusHtml(p, true)}</span>
     </div>
     ${EDITOR ? `
     <div class="detail-actions">
-      ${p.completed ? actionBtn('reopen', 'Reopen', `reopenProject('${p.id}')`) : actionBtn('check', 'Mark complete', `completeProject('${p.id}')`, {cls: 'ok'})}
+      ${actionBtn('reopen', 'Set status', `openProjectStatusModal('${p.id}')`, {compact: false})}
+      ${p.completed ? actionBtn('reopen', 'Reopen', `openProjectStatusModal('${p.id}', 'auto')`) : actionBtn('check', 'Mark complete', `openProjectStatusModal('${p.id}', 'Completed')`, {cls: 'ok'})}
       ${actionBtn('trash', 'Delete', `removeProject('${p.id}')`, {cls: 'danger'})}
     </div>` : ''}
+    ${renderStatusHistory(p)}
     <div class="scope-boxes">${d ? deviceBox(d, p) : ''}${projectBox(p)}</div>
     ${renderProjectAtdLinks(p)}
     ${renderQualification(p)}
     ${renderDocumentsSection(p)}
     ${renderTasksSection(p)}`;
+}
+
+// Project status history (3.2.3): every status set by hand, completion and reopening, with its reason.
+const openStatusHistory = new Set();
+function toggleStatusHistory(id){ if(openStatusHistory.has(id)) openStatusHistory.delete(id); else openStatusHistory.add(id); render(); }
+
+function renderStatusHistory(p){
+  const log = arr(p.statusLog);
+  const st = projectStatus(p);
+  const note = st.set ? `<span class="status-note">Status set by hand${st.reason ? ': ' + escapeHtml(st.reason) : ''}. Tasks would show ${escapeHtml(autoProjectStatus(p).label)}.</span>` : '';
+  if(!log.length && !note) return '';
+  const open = openStatusHistory.has(p.id);
+  const label = s => s === 'auto' ? '<span class="pill pill-neutral">Automatic</span>' : `<span class="pill pill-${s === 'Completed' ? 'sage' : PROJECT_STATUS_CLS[s] || 'slate'}">${escapeHtml(s)}</span>`;
+  return `
+    <div class="status-history">
+      ${note}
+      ${log.length ? `<button class="comments-toggle" type="button" aria-expanded="${open}" onclick="toggleStatusHistory('${p.id}')">${ICON.chevron}<span>Status history (${log.length})</span></button>` : ''}
+      ${open ? `<div class="act-list">${[...log].reverse().map(e => `
+        <div class="act-item act-log">
+          <span class="act-when">${fmtDate(e.date)}${e.time ? ', ' + escapeHtml(e.time) : ''}</span>
+          <div class="act-body"><div>${label(e.from)}<span class="act-arrow">→</span>${label(e.to)}</div>${e.reason ? `<div class="act-why rich-text">${formatText(e.reason)}</div>` : ''}</div>
+          <span></span>
+        </div>`).join('')}</div>` : ''}
+    </div>`;
 }
 
 function dueNote(iso){

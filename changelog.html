@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.2.2">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.3">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,22 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.2.3">
+        <h2 class="vh"><span class="vn">v3.2.3</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>Project status can be set by hand. Each aircraft project's status is still worked out from its tasks (In Progress, On Track, No Tasks) unless you choose one with Set status on its project page: Not Started, In Progress, Waiting, On Hold or Completed. Choosing Automatic goes back to the status from the tasks.</li>
+          <li>A status set by hand is marked "Set" with its date, on the project page and in the device page's Aircraft Projects list. The project page also notes what the tasks alone would show.</li>
+          <li>Every status change asks why, and is listed under Status history on the project page. The reason is optional only when completing.</li>
+        </ul>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>Mark complete and Reopen open the same Set status form, so completing and reopening are recorded in Status history too. Completing still records the regulation issue, as before.</li>
+          <li>When a status is set by hand, a missed date shows as a separate Overdue tag next to it, so a status such as Waiting can't hide it.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.2.2">
-        <h2 class="vh"><span class="vn">v3.2.2</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.2.2</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>Each aircraft on a sim is now its own project for shared device tasks. The reference, title and details stay shared, but each aircraft has its own status, due date, waiting-since and completed date.</li>
@@ -191,7 +205,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.2.2</div>
+  <div class="version-footer">v3.2.3</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

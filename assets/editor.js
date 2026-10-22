@@ -451,25 +451,64 @@ async function saveProject(){
 }
 $('p-save').addEventListener('click', saveProject);
 
-async function completeProject(id){
+// ---- Project status (3.2.3): automatic from the tasks, or set by hand. Mark complete and Reopen use the same
+// form. Every change asks why (optional only when completing) and is recorded in statusLog. ----
+let projectStatusForm = {id: '', from: ''};
+const projectStatusNow = p => p.completed ? 'Completed' : (projectOverride(p) ? projectOverride(p).status : 'auto');
+
+function openProjectStatusModal(id, preset){
   const p = projectById(id);
   if(!p) return;
-  p.completed = true;
-  p.dateCompleted = today();
-  lockRegulation(p);
-  await persist(`Complete project ${customerKey(p)} / ${projectName(p)}`);
-  render();
+  const from = projectStatusNow(p);
+  projectStatusForm = {id, from};
+  const d = p.device;
+  $('ps-project').textContent = `${customerKey(p)} / SN ${d ? d.serial || '—' : '—'} · ${projectName(p)}${d && multiProject(d.id) ? ' only' : ''}`;
+  const auto = autoProjectStatus(p).label;
+  const opts = [['auto', `Automatic <span class="muted">(from tasks: ${escapeHtml(auto)})</span>`], ...PROJECT_STATUSES.map(s => [s, escapeHtml(s)]),
+    ['Completed', 'Completed <span class="muted">(same as Mark complete)</span>']];
+  const pick = preset && preset !== from ? preset : from;
+  $('ps-options').innerHTML = opts.map(([v, l]) => `
+    <label class="ps-opt${v === from ? ' current' : ''}"><input type="radio" name="ps-status" value="${escapeHtml(v)}" ${v === pick ? 'checked' : ''}><span>${l}</span>${v === from ? '<span class="ps-current">Current</span>' : ''}</label>`).join('');
+  $('ps-reason').value = '';
+  hideErr('ps-err');
+  refreshProjectStatusReason();
+  openModalEl('project-status-modal-bg', 'ps-reason');
 }
 
-async function reopenProject(id){
-  const p = projectById(id);
-  if(!p) return;
-  p.completed = false;
-  delete p.dateCompleted;
-  unlockRegulation(p);
-  await persist(`Reopen project ${customerKey(p)} / ${projectName(p)}`);
+const chosenProjectStatus = () => (document.querySelector('input[name="ps-status"]:checked') || {}).value || '';
+
+function refreshProjectStatusReason(){
+  const to = chosenProjectStatus();
+  $('ps-reason-label').textContent = to === 'Completed' ? 'Why is it changing? (optional when completing)' : 'Why is it changing?';
+  $('ps-save').textContent = to === 'Completed' ? 'Mark completed' : 'Save change';
+  hideErr('ps-err');
+}
+$('ps-options').addEventListener('change', refreshProjectStatusReason);
+
+async function saveProjectStatus(){
+  const p = projectById(projectStatusForm.id);
+  if(!p) return closeModalEl('project-status-modal-bg');
+  const from = projectStatusForm.from, to = chosenProjectStatus(), reason = val('ps-reason');
+  if(!to || to === from) return showErr('ps-err', 'Choose a different status.');
+  if(to !== 'Completed' && !reason) return showErr('ps-err', 'Enter why the status is changing.');
+  const d = today(), t = nowTime();
+  if(to === 'Completed'){
+    p.completed = true;
+    p.dateCompleted = d;
+    lockRegulation(p);
+    delete p.statusOverride;
+  }else{
+    if(p.completed){ p.completed = false; delete p.dateCompleted; unlockRegulation(p); }
+    if(to === 'auto') delete p.statusOverride;
+    else p.statusOverride = {status: to, date: d, time: t, reason};
+  }
+  p.statusLog = [...arr(p.statusLog), {id: newId('p'), date: d, time: t, ts: Date.now(), from, to, reason}];
+  closeModalEl('project-status-modal-bg');
+  const what = to === 'Completed' ? 'Complete project' : from === 'Completed' ? 'Reopen project' : `Project status ${to === 'auto' ? 'automatic' : to}`;
+  await persist(`${what}: ${customerKey(p)} / ${projectName(p)}`);
   render();
 }
+$('ps-save').addEventListener('click', saveProjectStatus);
 
 function listParts(parts){ return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]; }
 

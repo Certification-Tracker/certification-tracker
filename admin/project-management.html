@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.2.2">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.2.3">
 </head>
 <body>
 <div class="wrap">
@@ -30,7 +30,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.2</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.3</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <!-- Device: Add customer / Add device / Edit device -->
@@ -239,6 +239,24 @@
     <div class="modal-actions">
       <button type="button" data-close>Cancel</button>
       <button class="btn-primary" id="st-save" type="button">Save change</button>
+    </div>
+  </div>
+</div>
+
+<!-- Set a project's status (3.2.3): automatic from its tasks, or chosen by hand; every change is logged -->
+<div class="modal-bg" id="project-status-modal-bg">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ps-title">
+    <h3 id="ps-title">Set project status</h3>
+    <p class="modal-intro" id="ps-project"></p>
+    <div class="ps-options" id="ps-options" role="radiogroup" aria-label="Project status"></div>
+    <div class="field">
+      <label for="ps-reason" id="ps-reason-label">Why is it changing?</label>
+      <textarea id="ps-reason" rows="3"></textarea>
+    </div>
+    <div class="err" id="ps-err"></div>
+    <div class="modal-actions">
+      <button type="button" data-close>Cancel</button>
+      <button class="btn-primary" id="ps-save" type="button">Save change</button>
     </div>
   </div>
 </div>
@@ -479,9 +497,9 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.2.2"></script>
-<script src="../assets/projects.js?v=3.2.2"></script>
-<script src="../assets/atd.js?v=3.2.2"></script>
-<script src="../assets/editor.js?v=3.2.2"></script>
+<script src="../assets/tracker.js?v=3.2.3"></script>
+<script src="../assets/projects.js?v=3.2.3"></script>
+<script src="../assets/atd.js?v=3.2.3"></script>
+<script src="../assets/editor.js?v=3.2.3"></script>
 </body>
 </html>

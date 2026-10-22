@@ -206,6 +206,8 @@ a.btn-text{text-decoration:none;}
 .dot-gold{background:var(--gold);}
 .dot-slate{background:var(--slate);}
 .dot-sage{background:var(--sage);}
+.dot-plum{background:var(--plum);}
+.dot-neutral{background:var(--ink-faint);}
 
 /* ===== Forms and pop-ups ===== */
 .modal-bg{position:fixed;inset:0;background:var(--backdrop);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:10;overflow-y:auto;}
@@ -552,6 +554,21 @@ a.btn-text{text-decoration:none;}
   .ac-line{grid-template-columns:minmax(0,1fr) auto;}
   .ac-state{grid-column:1 / -1;grid-row:2;}
 }
+
+/* ===== 3.2.3: project status set by hand ===== */
+.detail-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+.detail-status .pill,.row-side .pill{margin-right:0;}
+.row-side .pill + .pill,.row-side .pill + .status-set{margin-left:4px;}
+.status-set{font-size:var(--fs-xs);color:var(--ink-faint);white-space:nowrap;margin-right:6px;}
+.status-history{margin:6px 0 4px;}
+.status-note{display:block;font-size:var(--fs-sm);color:var(--ink-soft);max-width:90ch;}
+.ps-options{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;}
+.ps-opt{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:var(--fs-body);}
+.ps-opt:hover{background:var(--hover);}
+.ps-opt:has(input:checked){border-color:var(--action-ink);background:var(--slate-bg);}
+.ps-opt input{width:16px;height:16px;margin:0;}
+.ps-opt span:nth-of-type(1){flex:1;}
+.ps-current{font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-faint);}
 
 /* ===== Regulatory Library ===== */
 .lib-groups{margin-top:4px;}

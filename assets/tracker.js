@@ -5,7 +5,7 @@
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.2.2';
+const VERSION = 'v3.2.3';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
@@ -34,6 +34,8 @@ const QUAL_STATUSES = ['Pending', 'Conditional', 'Qualified', 'Expired', 'Withdr
 //            status and dates live per aircraft in aircraft: {<project id>: {status, dateDue, waitingSince,
 //            dateCompleted, timeCompleted, dateUpdated, timeUpdated}}. Reference, title and details are shared.
 //            A comment or log entry with projectId belongs to that aircraft; one without is shared (the device).
+//   project status (3.2.3): automatic from its tasks unless set by hand: statusOverride {status, date, time, reason}
+//            (Not Started, In Progress, Waiting, On Hold). Completed stays p.completed. statusLog records every change.
 // A project also answers for its device's fields (p.customer, p.serial ...) through read-only getters
 // that are never saved with the project.
 // =====================================================================
@@ -923,13 +925,34 @@ function projectHasOverdue(p){
   return !p.completed && (isProjectLate(p) || projectTasks(p).some(isTaskOverdue));
 }
 
-function projectStatus(p){
-  if(p.completed) return {label: 'Completed', cls: 'sage'};
+// Statuses that can be set by hand on a project (3.2.3); Completed is p.completed.
+const PROJECT_STATUSES = ['Not Started', 'In Progress', 'Waiting', 'On Hold'];
+const PROJECT_STATUS_CLS = {'Not Started': 'slate', 'In Progress': 'gold', Waiting: 'plum', 'On Hold': 'neutral'};
+const projectOverride = p => p.statusOverride && PROJECT_STATUSES.includes(p.statusOverride.status) ? p.statusOverride : null;
+
+// The status from the tasks alone (what Automatic shows).
+function autoProjectStatus(p){
   if(projectHasOverdue(p)) return {label: 'Overdue', cls: 'overdue'};
   const tasks = projectTasks(p);
   if(!tasks.length) return {label: 'No Tasks', cls: 'slate'};
   if(tasks.some(a => taskGroupOf(a) !== 'Complete')) return {label: 'In Progress', cls: 'gold'};
   return {label: 'On Track', cls: 'sage'};
+}
+
+// set: chosen by hand (3.2.3). A set status keeps Overdue as a separate flag (overdue) rather than replacing it.
+function projectStatus(p){
+  if(p.completed) return {label: 'Completed', cls: 'sage'};
+  const o = projectOverride(p);
+  if(o) return {label: o.status, cls: PROJECT_STATUS_CLS[o.status], set: true, overdue: projectHasOverdue(p), since: o.date, reason: o.reason};
+  return autoProjectStatus(p);
+}
+
+// Status pill, plus Overdue and "Set <date>" when the status was chosen by hand.
+function projectStatusHtml(p, withNote){
+  const st = projectStatus(p);
+  return `<span class="pill pill-${st.cls}"${st.reason ? ` title="${escapeHtml(st.reason)}"` : ''}>${escapeHtml(st.label)}</span>`
+    + (st.overdue ? '<span class="pill pill-overdue">Overdue</span>' : '')
+    + (withNote && st.set ? `<span class="status-set" title="${escapeHtml(st.reason || '')}">Set ${escapeHtml(fmtDate(st.since).replace(/, \d{4}$/, ''))}</span>` : '');
 }
 
 // Open first, overdue first, then by due date.
