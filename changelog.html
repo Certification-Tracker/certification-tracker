@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.2.1">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.2">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,26 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.2.2">
+        <h2 class="vh"><span class="vn">v3.2.2</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>Each aircraft on a sim is now its own project for shared device tasks. The reference, title and details stay shared, but each aircraft has its own status, due date, waiting-since and completed date.</li>
+          <li>On a project page, Complete, Reopen and Change status on a shared task change only that aircraft, and the page shows only that aircraft's status, dates and status changes.</li>
+          <li>On the device page, each shared task lists every aircraft on its own line with its status, due date, Change status and Complete or Reopen. The task is grouped under the aircraft that's furthest behind. Edit there sets each aircraft's due date.</li>
+          <li>Status pills, open-task counts, the home page and lists follow each aircraft's own status. Task rows on the home page and in lists name the aircraft.</li>
+          <li>Open task titles are in regular weight instead of bold.</li>
+          <li>The comment box is behind an "Add comment" link, with Add and Cancel. Unsent text is kept while the page is open.</li>
+          <li>Opening a bookmarked or refreshed project or device page now stays on that page instead of sometimes going back to Projects.</li>
+        </ul>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>Comments on shared tasks: one added on the device page is shared, tagged "Device", and shows on every aircraft's page. One added on a project page belongs to that aircraft. On the device page, each comment and status change is tagged with its aircraft or "Device".</li>
+          <li>One-time update: existing shared tasks copy their current status and due date to every aircraft, with a preview and a backup of the data file before saving.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.2.1">
-        <h2 class="vh"><span class="vn">v3.2.1</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.2.1</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>Tasks are laid out as a table in a frame for each status (Not Started, In Progress, Waiting, Completed), with columns for reference, task, due date or status, and comment count. Click a group's bar to fold it; Collapse all folds every group and closes every task.</li>
@@ -173,7 +191,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.2.1</div>
+  <div class="version-footer">v3.2.2</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

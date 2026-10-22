@@ -5,7 +5,7 @@
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.2.1';
+const VERSION = 'v3.2.2';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
@@ -30,10 +30,16 @@ const QUAL_STATUSES = ['Pending', 'Conditional', 'Qualified', 'Expired', 'Withdr
 //            qualification, completed, and its own documents, tasks and document history.
 //   task (3.2.1, schemaVersion 5): ref (optional item number, e.g. 6.1.B.1), title, details (optional), status,
 //            dates, comments, and log: every status change with its reason ({date, time, ts, from, to, reason}).
+//   shared device task (3.2.2, schemaVersion 6): each aircraft on the device is its own project, so the task's
+//            status and dates live per aircraft in aircraft: {<project id>: {status, dateDue, waitingSince,
+//            dateCompleted, timeCompleted, dateUpdated, timeUpdated}}. Reference, title and details are shared.
+//            A comment or log entry with projectId belongs to that aircraft; one without is shared (the device).
 // A project also answers for its device's fields (p.customer, p.serial ...) through read-only getters
 // that are never saved with the project.
 // =====================================================================
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
+// A shared device task's per-aircraft fields (3.2.2).
+const AIRCRAFT_FIELDS = ['status', 'dateDue', 'waitingSince', 'dateCompleted', 'timeCompleted', 'dateUpdated', 'timeUpdated'];
 const DEVICE_FIELDS = ['customer', 'serial', 'simModel', 'simLocation', 'contactName', 'contactEmail', 'docLocation'];
 
 let devices = [];
@@ -74,7 +80,12 @@ function linkProject(p){
   return p;
 }
 
+// Set once the projects file has been read: until then a project or device in the page address isn't
+// treated as missing (3.2.2: the library can finish loading first, which used to drop you on Projects).
+let dataLoaded = false;
+
 function setData(data){
+  dataLoaded = true;
   devices = data.devices;
   projects = data.projects;
   reindex();
@@ -110,7 +121,63 @@ function readData(raw){
   }
   const split = upgradeTasks(data);
   if(split.length) report.tasks = split;
-  return {data, converted: !!(report.devices || report.tasks), report, from};
+  const shared = upgradeSharedTasks(data);
+  if(shared.length) report.shared = shared;
+  return {data, converted: !!(report.devices || report.tasks || report.shared), report, from};
+}
+
+// ---- 3.2.2: a device task's status and dates are kept per aircraft ----
+// Every aircraft starts with the task's current status and dates, so nothing looks different until one changes.
+function upgradeSharedTasks(data){
+  const byDevice = new Map();
+  data.projects.forEach(p => { if(!byDevice.has(p.deviceId)) byDevice.set(p.deviceId, []); byDevice.get(p.deviceId).push(p); });
+  const changed = [];
+  data.devices.forEach(d => {
+    const list = byDevice.get(d.id) || [];
+    arr(d.tasks).forEach(t => {
+      if(isSharedTask(t)) return;
+      const state = {};
+      AIRCRAFT_FIELDS.forEach(k => { state[k] = t[k] || ''; });
+      state.status = taskStatusLabel(t.status);
+      t.aircraft = Object.fromEntries(list.map(p => [p.id, {...state}]));
+      AIRCRAFT_FIELDS.forEach(k => { delete t[k]; });
+      changed.push({owner: d, task: t, aircraft: list});
+    });
+  });
+  return changed;
+}
+
+function isSharedTask(t){ return !!t && !!t.aircraft && typeof t.aircraft === 'object' && !Array.isArray(t.aircraft); }
+
+// One aircraft's state on a shared task (an aircraft added later starts Not Started).
+function aircraftState(t, p){
+  return (t.aircraft && t.aircraft[p.id]) || {status: 'Not Started', dateDue: '', waitingSince: '', dateCompleted: '', timeCompleted: '', dateUpdated: '', timeUpdated: ''};
+}
+
+const forAircraft = (list, p) => arr(list).filter(x => !x.projectId || x.projectId === p.id);
+const laterDate = (a, b) => (a || '') > (b || '') ? a : b;
+
+// A shared task as one aircraft sees it: its own status and dates, shared and its own comments and log.
+// Read-only: the editor writes to the task itself (view.shared) and to aircraft[<id>].
+function aircraftView(t, p){
+  const s = aircraftState(t, p);
+  return {...t, ...s, status: taskStatusLabel(s.status), dateUpdated: laterDate(s.dateUpdated, t.dateUpdated),
+    comments: forAircraft(t.comments, p), log: forAircraft(t.log, p), shared: t, aircraftOf: p};
+}
+
+// A shared task on its device page: grouped under the aircraft that is furthest behind; lines lists every aircraft.
+function deviceTaskView(t, d){
+  const lines = sortProjects(projectsOf(d.id)).map(p => ({p, a: aircraftView(t, p)}));
+  const base = {...t, comments: arr(t.comments), log: arr(t.log), shared: t, lines};
+  if(!lines.length) return {...base, status: 'Not Started'};
+  const rank = a => TASK_GROUPS.indexOf(taskGroupOf(a));
+  const behind = lines.reduce((m, l) => rank(l.a) < rank(m.a) ? l : m, lines[0]).a;
+  const open = lines.filter(l => taskGroupOf(l.a) !== 'Complete');
+  const due = (open.length ? open : lines).map(l => l.a.dateDue).filter(Boolean).sort()[0] || '';
+  const waiting = lines.filter(l => taskGroupOf(l.a) === 'Waiting').map(l => l.a.waitingSince).filter(Boolean).sort()[0] || '';
+  const done = open.length ? '' : lines.map(l => l.a.dateCompleted).filter(Boolean).sort().pop() || '';
+  return {...base, status: taskGroupOf(behind), dateDue: due, waitingSince: waiting, dateCompleted: done, timeCompleted: '',
+    dateUpdated: lines.reduce((m, l) => laterDate(m, l.a.dateUpdated), t.dateUpdated || '')};
 }
 
 // ---- 3.2.1: a task's description becomes reference, title and details ----
@@ -280,8 +347,12 @@ function scopeOwners(ctx){
   return d ? [d, ctx] : [ctx];
 }
 
+// Shared device tasks come back as views (3.2.2): one aircraft's copy on a project page, every aircraft on the device page.
 function scopedList(ctx, key){
-  return scopeOwners(ctx).flatMap(owner => arr(owner[key]).map(item => ({item, owner})));
+  return scopeOwners(ctx).flatMap(owner => arr(owner[key]).map(item => {
+    if(key !== 'tasks' || !isDevice(owner) || !isSharedTask(item)) return {item, owner};
+    return isDevice(ctx) ? {item: deviceTaskView(item, owner), owner} : {item: aircraftView(item, ctx), owner, aircraft: ctx};
+  }));
 }
 
 // Small tags saying where an item belongs, shown when the device has more than one aircraft.
@@ -289,7 +360,7 @@ function shortProjectLabel(p){ return p.aircraft || p.level || projectName(p); }
 
 function scopeTag(owner, ctx){
   if(!owner || !multiProject(deviceOf(ctx) ? deviceOf(ctx).id : '')) return '';
-  if(isDevice(owner)) return '<span class="scope-tag dev" title="Applies to every aircraft on this device">All aircraft</span>';
+  if(isDevice(owner)) return '<span class="scope-tag dev" title="Shared by every aircraft on this device">Device</span>';
   if(isDevice(ctx)) return `<span class="scope-tag proj" title="${escapeHtml(projectName(owner))}">${escapeHtml(shortProjectLabel(owner))}</span>`;
   return '';
 }
@@ -430,12 +501,12 @@ function render(){
   const list = document.getElementById('list');
   if(!list || (EDITOR && !ghConfig)) return;
 
-  if(view.type === 'project' && !projectById(view.id)) view = {type: 'projects'};
-  if(view.type === 'device' && !deviceById(view.id)) view = {type: 'projects'};
+  if(dataLoaded && view.type === 'project' && !projectById(view.id)) view = {type: 'projects'};
+  if(dataLoaded && view.type === 'device' && !deviceById(view.id)) view = {type: 'projects'};
   if(view.type === 'reg' && libraryLoaded && !libraryDoc(view.id)) view = {type: 'library'};
   if(view.type === 'atd-dev' && atdLoaded && !atdDevice(view.id)) view = {type: 'atd'};
   if((view.type === 'v2log' || view.type === 'history') && !EDITOR) view = {type: 'home'};
-  if(view.type === 'doc' && !findScopedDoc(view.ctx, view.doc)) view = ownerById(view.ctx) ? ctxView(ownerById(view.ctx)) : {type: 'projects'};
+  if(dataLoaded && view.type === 'doc' && !findScopedDoc(view.ctx, view.doc)) view = ownerById(view.ctx) ? ctxView(ownerById(view.ctx)) : {type: 'projects'};
   rememberPlace();
 
   if(!document.getElementById('detail')){
@@ -599,8 +670,9 @@ function renderProjectsHome(){
   open.filter(x => taskGroupOf(x.a) === 'Waiting').forEach(x => (waitingBy[x.c.id] = waitingBy[x.c.id] || []).push(x));
 
   const who = c => escapeHtml(customerKey(c));
-  const taskText = x => `${who(x.c)} \u00b7 ${escapeHtml(plainSnippet(taskLabel(x.a), 90))}`;
-  const taskAction = x => ({type: 'task', ownerId: x.owner.id, taskId: x.a.id});
+  // A device with several aircraft names the aircraft, since each keeps its own status (3.2.2).
+  const taskText = x => `${who(x.c)}${!isDevice(x.c) && multiProject(x.c.deviceId) ? ' <span class="row-sub">(' + escapeHtml(shortProjectLabel(x.c)) + ')</span>' : ''} \u00b7 ${escapeHtml(plainSnippet(taskLabel(x.a), 90))}`;
+  const taskAction = x => ({type: 'task', ownerId: x.owner.id, taskId: x.a.id, aircraftId: airId(x)});
   const projText = p => `${who(p)} \u00b7 ${escapeHtml(projectName(p))}`;
   const projAction = p => ({type: 'project', id: p.id});
   // One list (3.1.1): soonest date first (overdue items lead), then undated items, oldest Waiting first.
@@ -685,12 +757,17 @@ function renderV2Log(){
 // Lists (opened from the home page)
 // =====================================================================
 function allTasks(){
-  // c: what the row names (the project, or the device for tasks shared by every aircraft); owner: where the task is stored.
+  // c: the project the row names; owner: where the task is stored. A shared device task counts once per
+  // aircraft, with that aircraft's status and dates (3.2.2: each aircraft is its own project).
   return [
-    ...devices.flatMap(d => arr(d.tasks).map(a => ({a, owner: d, c: projectsOf(d.id).length === 1 ? projectsOf(d.id)[0] : d}))),
+    ...devices.flatMap(d => arr(d.tasks).flatMap(a => isSharedTask(a)
+      ? projectsOf(d.id).map(p => ({a: aircraftView(a, p), owner: d, c: p, aircraft: p}))
+      : [{a, owner: d, c: projectsOf(d.id).length === 1 ? projectsOf(d.id)[0] : d}])),
     ...projects.flatMap(p => arr(p.tasks).map(a => ({a, owner: p, c: p})))
   ];
 }
+
+const airId = x => x.aircraft ? x.aircraft.id : '';
 
 function projectsDueWithin(days){
   const today = localToday(), last = isoAddDays(today, days);
@@ -749,7 +826,7 @@ function dueText(due, done, overdue){
 
 // "Customer · SN: … · Authority Level" (a device line has no authority).
 function ownerLine(c){
-  return `<b class="row-strong">${escapeHtml(customerKey(c))}</b> <span class="row-sub">\u00b7 SN: ${escapeHtml(c.serial || '\u2014')}${(c.authority || c.level) ? ' \u00b7 ' + escapeHtml([c.authority, c.level].filter(Boolean).join(' ')) : (isDevice(c) ? ' \u00b7 all aircraft' : '')}</span>`;
+  return `<b class="row-strong">${escapeHtml(customerKey(c))}</b> <span class="row-sub">\u00b7 SN: ${escapeHtml(c.serial || '\u2014')}${(c.authority || c.level) ? ' \u00b7 ' + escapeHtml([c.authority, c.level].filter(Boolean).join(' ')) : (isDevice(c) ? ' \u00b7 all aircraft' : '')}${!isDevice(c) && multiProject(c.deviceId) ? ' \u00b7 ' + escapeHtml(shortProjectLabel(c)) : ''}</span>`;
 }
 
 function plainSnippet(s, max){
@@ -767,7 +844,7 @@ function listRowHtml(kind, item, from){
   if(kind === 'atd') return rowButton({type: 'atd', id: item.id, from}, atdLine(item), atdRowSide(item));
   const {c, a} = item;
   const status = taskStatusLabel(a.status);
-  return rowButton({type: 'task', ownerId: item.owner.id, taskId: a.id, from},
+  return rowButton({type: 'task', ownerId: item.owner.id, taskId: a.id, aircraftId: airId(item), from},
     `${ownerLine(c)}<br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${escapeHtml(plainSnippet(taskLabel(a), 180))}${status === 'Waiting' && a.waitingSince ? ` <span class="row-sub">\u00b7 Waiting since ${fmtDate(a.waitingSince)}</span>` : ''}`,
     dueText(a.dateDue, status === 'Complete' ? a.dateCompleted : '', isTaskOverdue(a)));
 }
@@ -779,17 +856,19 @@ function openRow(i){
   if(act.type === 'device') return navigate({type: 'device', id: act.id}, act.from);
   if(act.type === 'reg') return navigate({type: 'reg', id: act.id, page: act.page}, act.from);
   if(act.type === 'atd') return navigate({type: 'atd-dev', id: act.id, doc: act.doc || '', page: act.page || 1}, act.from);
-  if(act.type === 'task') openTask(act.ownerId, act.taskId, act.comment, act.from);
+  if(act.type === 'task') openTask(act.ownerId, act.taskId, act.comment, act.from, act.aircraftId);
 }
 
 // Opens the page a task is shown on, with its group and the task open, and the task highlighted.
-function openTask(ownerId, taskId, comment, from){
+// aircraftId: a shared device task opens on that aircraft's project page (3.2.2).
+function openTask(ownerId, taskId, comment, from, aircraftId){
   const owner = ownerById(ownerId);
   const a = owner && arr(owner.tasks).find(x => x.id === taskId);
   if(!a) return;
-  let target = owner;
-  if(isDevice(owner) && projectsOf(owner.id).length === 1) target = projectsOf(owner.id)[0];
-  closedTaskGroups.delete(taskGroupKey(target.id, taskGroupOf(a)));
+  let target = (aircraftId && projectById(aircraftId)) || owner;
+  if(target === owner && isDevice(owner) && projectsOf(owner.id).length === 1) target = projectsOf(owner.id)[0];
+  const shown = scopedList(target, 'tasks').find(x => x.item.id === taskId);
+  closedTaskGroups.delete(taskGroupKey(target.id, taskGroupOf(shown ? shown.item : a)));
   openTasks.add(a.id);
   pendingFocus = a.id;
   navigate(ctxView(target), from);
@@ -1286,9 +1365,26 @@ function searchProjects(t){
      ...scopedList(p, 'docs').map(x => x.item.name)].some(v => textHas(v, t))));
 }
 
+// A shared device task is found once (on its device page) for its reference, title, details and shared
+// comments; an aircraft's own comments and status reasons point to that aircraft's project (3.2.2).
 function searchTasks(t){
   const out = [];
-  allTasks().forEach(x => {
+  const hit = v => textHas(v, t);
+  devices.forEach(d => arr(d.tasks).filter(isSharedTask).forEach(real => {
+    const list = projectsOf(d.id);
+    if(!list.length) return;
+    const single = list.length === 1 ? list[0] : null;
+    const whole = {a: single ? aircraftView(real, single) : deviceTaskView(real, d), owner: d, c: single || d, aircraft: single};
+    const one = p => ({a: aircraftView(real, p), owner: d, c: p, aircraft: p});
+    if([real.ref, taskTitle(real), real.details, ...arr(real.log).filter(e => !e.projectId).map(e => e.reason)].some(hit)) out.push({...whole, kind: 'task'});
+    else list.forEach(p => { if(arr(real.log).some(e => e.projectId === p.id && hit(e.reason))) out.push({...one(p), kind: 'task'}); });
+    arr(real.comments).forEach(cm => {
+      if(!hit(cm.text)) return;
+      const p = cm.projectId ? projectById(cm.projectId) : null;
+      out.push({...(p ? one(p) : whole), cm, kind: 'comment'});
+    });
+  }));
+  allTasks().filter(x => !x.aircraft).forEach(x => {
     if([x.a.ref, taskTitle(x.a), x.a.details, ...arr(x.a.log).map(e => e.reason)].some(v => textHas(v, t))) out.push({...x, kind: 'task'});
     arr(x.a.comments).forEach(cm => { if(textHas(cm.text, t)) out.push({...x, cm, kind: 'comment'}); });
   });
@@ -1361,7 +1457,7 @@ function renderSearchView(){
     body += groupHead('tasks', 'Tasks and comments', taskHits.length) + taskHits.slice(0, all ? 3 : undefined).map(x => {
       const status = taskStatusLabel(x.a.status);
       const text = x.kind === 'comment' ? x.cm.text : taskLabel(x.a);
-      return rowButton({type: 'task', ownerId: x.owner.id, taskId: x.a.id, comment: x.kind === 'comment', from},
+      return rowButton({type: 'task', ownerId: x.owner.id, taskId: x.a.id, aircraftId: airId(x), comment: x.kind === 'comment', from},
         `<span class="row-sub">${escapeHtml(customerKey(x.c))} \u00b7 SN: ${escapeHtml(x.c.serial || '\u2014')}</span><br><span class="pill pill-${taskStatusClass(status)}">${escapeHtml(status)}</span>${x.kind === 'comment' ? ICON.comment : ''}${highlight(plainSnippet(text, 200), q)}`,
         x.kind === 'comment' ? 'Comment' : 'Task');
     }).join('');

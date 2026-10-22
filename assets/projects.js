@@ -91,7 +91,8 @@ function renderProjectsView(){
       const openN = c.projects.filter(p => !p.completed).length;
       const devs = c.devices.map(({device: d, projects: list}) => {
         const sKey = 's:' + a.name + '|' + d.id, sOpen = !closedTree.has(sKey);
-        const tasks = [...arr(d.tasks), ...list.flatMap(p => arr(p.tasks))];
+        // Each aircraft counts its own copy of a shared device task (3.2.2).
+        const tasks = list.flatMap(projectTasks);
         const loc = EDITOR ? d.simLocation : publicLocation(d.simLocation);
         const rows = list.map(p => {
           const st = projectStatus(p);
@@ -447,6 +448,38 @@ function taskActivity(a){
   ].sort((x, y) => x.k.localeCompare(y.k));
 }
 
+// Who an Activity item belongs to on a shared device task (3.2.2): on the device page every item is tagged with
+// its aircraft or "Device"; on a project page only the shared (device) comments are tagged.
+function activityTag(a, e, kind){
+  const deviceId = a.aircraftOf ? a.aircraftOf.deviceId : (a.lines && a.lines.length ? a.lines[0].p.deviceId : '');
+  if(!a.shared || !multiProject(deviceId)) return '';
+  if(e.projectId){
+    if(!a.lines) return '';
+    const p = projectById(e.projectId);
+    return p ? `<span class="scope-tag proj" title="${escapeHtml(projectName(p))}">${escapeHtml(shortProjectLabel(p))}</span>` : '';
+  }
+  if(kind === 'log' && !a.lines) return '';
+  return '<span class="scope-tag dev" title="Shared by every aircraft on this device">Device</span>';
+}
+
+// Comment box (3.2.2): hidden behind an "Add comment" link; unsent text is kept while the page is open.
+const openCommentBoxes = new Set();
+const commentKey = (ownerId, taskId, aircraftId) => ownerId + '|' + taskId + '|' + (aircraftId || '');
+
+function openCommentBox(ownerId, taskId, aircraftId){
+  openCommentBoxes.add(commentKey(ownerId, taskId, aircraftId));
+  render();
+  const box = document.getElementById('cmt-' + taskId);
+  if(box){ box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+}
+
+function cancelCommentBox(ownerId, taskId, aircraftId){
+  const key = commentKey(ownerId, taskId, aircraftId);
+  openCommentBoxes.delete(key);
+  delete commentDrafts[key];
+  render();
+}
+
 function renderActivity(owner, a){
   const items = taskActivity(a);
   const when = e => `${fmtDate(e.date)}${e.time ? ', ' + escapeHtml(e.time) : ''}`;
@@ -454,7 +487,7 @@ function renderActivity(owner, a){
     if(kind === 'comment') return `
       <div class="act-item act-comment">
         <span class="act-when">${when(e)}</span>
-        <div class="act-body">${ICON.comment}<span class="rich-text">${formatText(e.text)}</span></div>
+        <div class="act-body">${ICON.comment}${activityTag(a, e, 'comment')}<span class="rich-text">${formatText(e.text)}</span></div>
         ${EDITOR ? `<button class="comment-del" type="button" title="Delete comment" aria-label="Delete comment" onclick="deleteComment('${owner.id}', '${a.id}', '${e.id}')">${ICON.x}</button>` : '<span></span>'}
       </div>`;
     const change = e.kind === 'entered'
@@ -464,17 +497,22 @@ function renderActivity(owner, a){
     return `
       <div class="act-item act-log">
         <span class="act-when">${when(e)}</span>
-        <div class="act-body"><div>${change}</div>${why}</div>
+        <div class="act-body"><div>${activityTag(a, e, 'log')}${change}</div>${why}</div>
         <span></span>
       </div>`;
   }).join('');
-  const key = owner.id + '|' + a.id;
-  const form = EDITOR ? `
+  const air = a.aircraftOf ? a.aircraftOf.id : '';
+  const key = commentKey(owner.id, a.id, air);
+  const args = `'${owner.id}', '${a.id}', '${air}'`;
+  const note = a.lines && multiProject(owner.id) ? '<div class="comment-note">Shared: shows on every aircraft’s project page.</div>' : '';
+  const form = !EDITOR ? '' : openCommentBoxes.has(key) ? `
       <div class="comment-add">
-        <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment('${owner.id}', '${a.id}'); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
-        <button class="btn-primary" type="button" onclick="addComment('${owner.id}', '${a.id}')">Add</button>
+        <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment(${args}); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
+        <div class="comment-add-btns"><button class="btn-primary" type="button" onclick="addComment(${args})">Add</button><button type="button" onclick="cancelCommentBox(${args})">Cancel</button></div>
       </div>
-      <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>` : '';
+      ${note}
+      <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>`
+    : `<button class="text-link add-comment" type="button" onclick="openCommentBox(${args})">${ICON.plus}<span>Add comment${commentDrafts[key] ? ' <span class="muted">(unsent draft)</span>' : ''}</span></button>`;
   return `<div class="act-list"><div class="act-head">Activity</div>${rows || '<div class="entry-empty">Nothing yet</div>'}</div>${form}`;
 }
 
@@ -489,20 +527,46 @@ function taskDueCell(a){
   return '<span class="muted">—</span>';
 }
 
+// Complete or Reopen for one task, or one aircraft's copy of a shared task (3.2.2).
+function taskBtn(ownerId, a, aircraftId){
+  if(!EDITOR) return '';
+  const args = `'${ownerId}', '${a.id}', '${taskGroupOf(a) === 'Complete' ? 'Not Started' : 'Complete'}', '${aircraftId || ''}'`;
+  return taskGroupOf(a) === 'Complete'
+    ? `<button class="task-btn" type="button" onclick="event.stopPropagation(); openStatusModal(${args})">${ICON.reopen}<span>Reopen</span></button>`
+    : `<button class="task-btn ok" type="button" onclick="event.stopPropagation(); openStatusModal(${args})">${ICON.check}<span>Complete</span></button>`;
+}
+
+// Device page: one line per aircraft on a shared task, each with its own status, due date and button.
+function renderAircraftLines(x, cols){
+  const a = x.item, owner = x.owner;
+  const lines = a.lines.map(({p, a: v}) => {
+    const g = taskGroupOf(v);
+    const state = g === 'Complete' ? taskDueCell(v) : `${statusPill(g)}<span class="ac-due">${v.dateDue || (g === 'Waiting' && v.waitingSince) ? taskDueCell(v) : '<span class="muted">No due date</span>'}</span>`;
+    return `
+        <div class="ac-line">
+          <button class="text-link ac-name" type="button" onclick="openTask('${owner.id}', '${a.id}', false, null, '${p.id}')" title="Open ${escapeHtml(projectName(p))}">${escapeHtml(shortProjectLabel(p))}</button>
+          <span class="ac-state">${state}</span>
+          ${EDITOR ? `<span class="ac-btns"><button class="text-link ac-change" type="button" onclick="openStatusModal('${owner.id}', '${a.id}', '', '${p.id}')">Change status</button>${taskBtn(owner.id, v, p.id)}</span>` : ''}
+        </div>`;
+  }).join('');
+  return `<tr class="task-aircraft"><td class="tc-chev"></td><td colspan="${cols - 1}"><div class="ac-lines">${lines || '<span class="muted">No aircraft on this device.</span>'}</div></td></tr>`;
+}
+
 function renderTaskRow(x, ctx){
   const a = x.item, owner = x.owner;
   const open = openTasks.has(a.id);
   const done = taskGroupOf(a) === 'Complete';
   const n = arr(a.comments).length;
-  const btn = !EDITOR ? '' : done
-    ? `<button class="task-btn" type="button" onclick="event.stopPropagation(); openStatusModal('${owner.id}', '${a.id}', 'Not Started')">${ICON.reopen}<span>Reopen</span></button>`
-    : `<button class="task-btn ok" type="button" onclick="event.stopPropagation(); openStatusModal('${owner.id}', '${a.id}', 'Complete')">${ICON.check}<span>Complete</span></button>`;
+  const lines = !!a.lines;   // a shared task on its device page
+  const air = x.aircraft ? x.aircraft.id : '';
+  const btn = lines ? '' : taskBtn(owner.id, a, air);
   const meta = [
     `Entered ${fmtDate(a.dateCreated)}${a.timeCreated ? ', ' + escapeHtml(a.timeCreated) : ''}`,
     a.dateDue ? `Due ${fmtDate(a.dateDue)}` : '',
     a.dateUpdated && a.dateUpdated !== a.dateCreated ? `Updated ${fmtDate(a.dateUpdated)}${a.timeUpdated ? ', ' + escapeHtml(a.timeUpdated) : ''}` : '',
     a.dateCompleted ? `Completed ${fmtDate(a.dateCompleted)}${a.timeCompleted ? ', ' + escapeHtml(a.timeCompleted) : ''}${lateNote(a)}` : ''
   ].filter(Boolean).join(' · ');
+  const cols = EDITOR ? 6 : 5;
   return `
     <tr class="task-row${open ? ' open' : ''}${done ? ' done' : ''}" id="task-${a.id}" onclick="toggleTaskRow('${a.id}')" aria-expanded="${open}">
       <td class="tc-chev">${ICON.chevron}</td>
@@ -512,13 +576,14 @@ function renderTaskRow(x, ctx){
       <td class="tc-cm${n ? '' : ' muted'}" title="${countLabel(n, 'comment', 'comments')}">${n}</td>
       ${EDITOR ? `<td class="tc-act">${btn}</td>` : ''}
     </tr>
-    ${open ? `<tr class="task-more"><td class="tc-chev"></td><td colspan="${EDITOR ? 5 : 4}">
+    ${lines ? renderAircraftLines(x, cols) : ''}
+    ${open ? `<tr class="task-more"><td class="tc-chev"></td><td colspan="${cols - 1}">
       ${a.details ? `<div class="task-details rich-text">${formatText(a.details)}</div>` : ''}
       <div class="entry-meta">${meta}</div>
       ${renderActivity(owner, a)}
       ${EDITOR ? `<div class="task-actions">
         ${actionBtn('edit', 'Edit', `openTaskModal('${ctx.id}', '${owner.id}', '${a.id}')`, {compact: false})}
-        ${actionBtn('reopen', 'Change status', `openStatusModal('${owner.id}', '${a.id}')`, {compact: false})}
+        ${lines ? '' : actionBtn('reopen', 'Change status', `openStatusModal('${owner.id}', '${a.id}', '', '${air}')`, {compact: false})}
         ${actionBtn('trash', 'Delete', `deleteTask('${owner.id}', '${a.id}')`, {cls: 'danger', compact: false})}
       </div>` : ''}
     </td></tr>` : ''}`;

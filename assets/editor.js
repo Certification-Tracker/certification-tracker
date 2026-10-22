@@ -211,6 +211,24 @@ function openConversion(){
         <tbody>${list.sort((a, b) => taskSortCmp({item: a}, {item: b})).map(x => `<tr><td class="tc-ref">${escapeHtml(x.ref) || '<span class="muted">—</span>'}</td><td>${escapeHtml(x.title)}</td><td class="muted">${escapeHtml(plainSnippet(x.details, 120)) || '—'}</td></tr>`).join('')}</tbody>
       </table>`).join('')}</div>`;
   }
+  const sh = rep.shared;
+  if(sh && sh.some(x => x.aircraft.length)){
+    const list = sh.filter(x => x.aircraft.length);
+    const byDevice = new Map();
+    list.forEach(x => { if(!byDevice.has(x.owner)) byDevice.set(x.owner, []); byDevice.get(x.owner).push(x); });
+    html += `
+    <h4 class="cv-head">Shared device tasks: each aircraft on its own</h4>
+    <p>Each aircraft on a device is now its own project for shared tasks. The reference, title and details stay shared; the <b>status, due date and completed date</b> are kept for each aircraft. ${countLabel(list.length, 'shared task', 'shared tasks')} on ${countLabel(byDevice.size, 'device', 'devices')} start with their current status and due date on every aircraft, so nothing looks different until you change one.</p>
+    <div class="cv-tasks">${[...byDevice.entries()].map(([d, items]) => `
+      <div class="cv-owner">${escapeHtml(customerKey(d))} / SN ${escapeHtml(d.serial || '—')} · ${escapeHtml(items[0].aircraft.map(shortProjectLabel).join(', '))}</div>
+      <table class="cv-table"><colgroup><col class="tw-ref"><col><col class="tw-due"></colgroup>
+        <thead><tr><th>Ref</th><th>Title</th><th>Each aircraft starts</th></tr></thead>
+        <tbody>${items.sort((a, b) => taskSortCmp({item: a.task}, {item: b.task})).map(x => {
+          const st = aircraftState(x.task, x.aircraft[0]);
+          return `<tr><td class="tc-ref">${escapeHtml(x.task.ref) || '<span class="muted">—</span>'}</td><td>${escapeHtml(taskTitle(x.task))}</td><td>${statusPill(taskStatusLabel(st.status))}${st.dateDue ? ' ' + fmtDate(st.dateDue) : ''}</td></tr>`;
+        }).join('')}</tbody>
+      </table>`).join('')}</div>`;
+  }
   html += `<p class="muted">A copy of the current file is saved first, to ${escapeHtml(backupPath())}. Older versions also stay in Version history.</p>`;
   $('cv-body').innerHTML = html;
   hideErr('cv-err');
@@ -231,7 +249,8 @@ async function confirmConversion(){
     const path = backupPath();
     await ghWriteFile(path, JSON.stringify(pendingConversion.raw, null, 2) + '\n', await ghFileSha(path), 'Backup before updating the data format');
     projects.filter(p => p.completed && !qual(p).basisDocId && !qual(p).basisRevision).forEach(lockRegulation);
-    await writeData(pendingConversion.report.devices ? 'Convert tracker data to devices and projects (v3.2.1)' : 'Split tasks into reference, title and details (v3.2.1)');
+    const r = pendingConversion.report;
+    await writeData(r.devices ? 'Convert tracker data to devices and projects (v3.2.2)' : r.tasks ? 'Split tasks into reference, title and details (v3.2.2)' : 'Keep shared device task status per aircraft (v3.2.2)');
     pendingConversion = null;
     closeModalEl('convert-modal-bg');
     broadcastSaved();
@@ -474,6 +493,12 @@ function removeProject(id){
     <p>It can't be undone here, but Version history can restore an earlier copy.</p>`, 'Delete project', async () => {
     projects = projects.filter(x => x.id !== id);
     if(last) devices = devices.filter(x => x !== d);
+    else if(d) arr(d.tasks).forEach(t => {
+      // Its copy of each shared task goes with it: status, dates, its own comments and status changes.
+      if(t.aircraft) delete t.aircraft[id];
+      t.comments = arr(t.comments).filter(c => c.projectId !== id);
+      t.log = arr(t.log).filter(e => e.projectId !== id);
+    });
     atd.devices.forEach(a => { if(arr(a.certIds).includes(id)) a.certIds = a.certIds.filter(x => x !== id); });
     reindex();
     view = last || !d ? {type: 'projects'} : {type: 'device', id: d.id};
@@ -514,48 +539,103 @@ const findIn = (owner, key, id) => owner ? arr(owner[key]).find(x => x.id === id
 // =====================================================================
 // Tasks and comments
 // =====================================================================
-let taskForm = {ctxId: '', ownerId: '', taskId: '', status: ''};
+let taskForm = {ctxId: '', ownerId: '', taskId: '', status: '', aircraftId: '', perAircraft: false};
 
 // Add Task sets the starting status. On an existing task the status can change here too; that needs a reason
 // (optional only when completing), recorded in the task's Activity like any other status change.
+// A shared device task (3.2.2): on a project page, status and due date are that aircraft's; on the device page,
+// each aircraft's due date is listed and status is changed on each aircraft's line.
 function openTaskModal(ctxId, ownerId, taskId){
   const ctx = ownerById(ctxId);
   if(!ctx) return;
   const owner = ownerId ? ownerById(ownerId) : ctx;
-  const a = taskId ? findIn(owner, 'tasks', taskId) : null;
-  taskForm = {ctxId, ownerId: owner.id, taskId: a ? a.id : '', status: a ? taskGroupOf(a) : ''};
-  $('task-modal-title').textContent = a ? 'Edit Task' : 'Add Task';
-  $('a-ref').value = a ? a.ref || '' : '';
-  $('a-title').value = a ? taskTitle(a) : '';
-  $('a-details').value = a ? a.details || '' : '';
-  $('a-status').value = a ? taskGroupOf(a) : 'Not Started';
-  $('a-due').value = a ? a.dateDue || '' : '';
+  const t = taskId ? findIn(owner, 'tasks', taskId) : null;
+  const shared = isSharedTask(t);
+  const aircraft = shared && !isDevice(ctx) ? ctx : null;
+  const perAircraft = shared && isDevice(ctx);
+  const a = aircraft ? aircraftView(t, aircraft) : t;
+  taskForm = {ctxId, ownerId: owner.id, taskId: t ? t.id : '', status: a && !perAircraft ? taskGroupOf(a) : '', aircraftId: aircraft ? aircraft.id : '', perAircraft};
+  $('task-modal-title').textContent = t ? 'Edit Task' : 'Add Task';
+  $('a-ref').value = t ? t.ref || '' : '';
+  $('a-title').value = t ? taskTitle(t) : '';
+  $('a-details').value = t ? t.details || '' : '';
+  $('a-status').value = a && !perAircraft ? taskGroupOf(a) : 'Not Started';
+  $('a-due').value = a && !perAircraft ? a.dateDue || '' : '';
+  $('a-status-row').hidden = perAircraft;
+  $('a-aircraft-field').hidden = !perAircraft;
+  $('a-aircraft-dues').innerHTML = perAircraft ? sortProjects(projectsOf(owner.id)).map(p => `
+    <div class="ac-due-row"><label for="a-due-${p.id}">${escapeHtml(projectName(p))}</label><input id="a-due-${p.id}" type="date" value="${escapeHtml(aircraftState(t, p).dateDue || '')}"></div>`).join('') : '';
   $('a-reason').value = '';
   refreshTaskReason();
   fillScope('a', ctx, owner);
+  refreshTaskScopeNote();
   hideErr('task-err');
-  openModalEl('task-modal-bg', a ? 'a-title' : 'a-ref');
+  openModalEl('task-modal-bg', t ? 'a-title' : 'a-ref');
 }
+
+// What the status and due date apply to, for tasks shared by the aircraft on a device.
+function refreshTaskScopeNote(){
+  const owner = ownerById($('a-scope').value) || ownerById(taskForm.ownerId);
+  const multi = owner && multiProject(deviceOf(owner) ? deviceOf(owner).id : '');
+  let text = '';
+  if(multi && isDevice(owner)){
+    if(taskForm.perAircraft) text = 'Reference, title and details are shared by every aircraft. Each aircraft keeps its own due date (below) and status (Change status on its line).';
+    else if(taskForm.aircraftId) text = `Status and due date are for ${projectName(projectById(taskForm.aircraftId))} only. Reference, title and details are shared by every aircraft on this device.`;
+    else if(!taskForm.taskId) text = 'Shared: every aircraft starts with this status and due date, then each aircraft keeps its own.';
+    else text = 'Shared: every aircraft starts with this status and due date, then each keeps its own.';
+  }
+  $('a-scope-note').textContent = text;
+  $('a-scope-note').hidden = !text;
+}
+$('a-scope').addEventListener('change', refreshTaskScopeNote);
 
 // The reason box appears when an existing task's status is changed in the form.
 function refreshTaskReason(){
-  const changed = !!taskForm.taskId && $('a-status').value !== taskForm.status;
+  const changed = !!taskForm.taskId && !taskForm.perAircraft && $('a-status').value !== taskForm.status;
   $('a-reason-field').hidden = !changed;
   $('a-reason-label').textContent = $('a-status').value === 'Complete' ? 'Why is it changing? (optional when completing)' : 'Why is the status changing?';
 }
 $('a-status').addEventListener('change', refreshTaskReason);
 
-// Records a status change in the task's log and updates its dates.
-function applyStatusChange(a, to, reason){
-  const from = taskGroupOf(a);
+// One aircraft's state on a shared task, created when it is first changed (3.2.2).
+function ensureAircraftState(t, p){
+  if(!isSharedTask(t)) t.aircraft = {};
+  if(!t.aircraft[p.id]) t.aircraft[p.id] = {...aircraftState(t, p)};
+  return t.aircraft[p.id];
+}
+
+const pickState = src => Object.fromEntries(AIRCRAFT_FIELDS.map(k => [k, src[k] || '']));
+
+// A task becomes shared by every aircraft on device d, each starting from its current status and dates.
+function shareTask(t, d){
+  const state = pickState(t);
+  state.status = taskGroupOf(t);
+  t.aircraft = Object.fromEntries(projectsOf(d.id).map(p => [p.id, {...state}]));
+  AIRCRAFT_FIELDS.forEach(k => { delete t[k]; });
+}
+
+// A shared task moves to one aircraft: it keeps that aircraft's status and dates, and every comment.
+function unshareTask(t, p){
+  Object.assign(t, pickState(aircraftState(t, p)));
+  delete t.aircraft;
+  t.comments = arr(t.comments).map(c => { const n = {...c}; delete n.projectId; return n; });
+  t.log = arr(t.log).filter(e => !e.projectId || e.projectId === p.id).map(e => { const n = {...e}; delete n.projectId; return n; });
+}
+
+// Records a status change in the task's log and updates its dates. p: the aircraft, for a shared device task.
+function applyStatusChange(a, to, reason, p){
+  const s = p && isSharedTask(a) ? ensureAircraftState(a, p) : a;
+  const from = taskGroupOf(s);
   if(from === to) return false;
   const d = today(), t = nowTime();
-  a.log = [...arr(a.log), {id: newId('s'), date: d, time: t, ts: Date.now(), from, to, reason}];
-  a.status = to;
-  a.waitingSince = to === 'Waiting' ? d : '';
-  if(to === 'Complete'){ a.dateCompleted = d; a.timeCompleted = t; }
-  else{ a.dateCompleted = ''; a.timeCompleted = ''; }
-  a.dateUpdated = d; a.timeUpdated = t;
+  const entry = {id: newId('s'), date: d, time: t, ts: Date.now(), from, to, reason};
+  if(s !== a) entry.projectId = p.id;
+  a.log = [...arr(a.log), entry];
+  s.status = to;
+  s.waitingSince = to === 'Waiting' ? d : '';
+  if(to === 'Complete'){ s.dateCompleted = d; s.timeCompleted = t; }
+  else{ s.dateCompleted = ''; s.timeCompleted = ''; }
+  s.dateUpdated = d; s.timeUpdated = t;
   return true;
 }
 
@@ -564,23 +644,42 @@ async function saveTask(){
   if(!title) return showErr('task-err', 'Enter a title.');
   const status = $('a-status').value || 'Not Started';
   const reason = val('a-reason');
-  if(taskForm.taskId && status !== taskForm.status && status !== 'Complete' && !reason) return showErr('task-err', 'Enter why the status is changing.');
+  const per = taskForm.perAircraft;
+  if(taskForm.taskId && !per && status !== taskForm.status && status !== 'Complete' && !reason) return showErr('task-err', 'Enter why the status is changing.');
   const oldOwner = ownerById(taskForm.ownerId);
   const newOwner = ownerById($('a-scope').value) || oldOwner;
   const dateDue = isoDate($('a-due').value);
   const d = today(), t = nowTime();
+  const ctxAircraft = taskForm.aircraftId ? projectById(taskForm.aircraftId) : null;
+  // Per-aircraft due dates typed on the device page.
+  const dues = per ? Object.fromEntries(projectsOf(oldOwner.id).map(p => [p.id, isoDate(($('a-due-' + p.id) || {}).value || '')])) : {};
   let a = taskForm.taskId ? findIn(oldOwner, 'tasks', taskForm.taskId) : null;
   if(a){
-    Object.assign(a, {ref, title, details, dateDue, dateUpdated: d, timeUpdated: t});
+    Object.assign(a, {ref, title, details, dateUpdated: d, timeUpdated: t});
     delete a.description;
-    applyStatusChange(a, status, reason);
+    const wasShared = isSharedTask(a), toDevice = isDevice(newOwner);
+    if(wasShared && toDevice){
+      if(per) Object.entries(dues).forEach(([id, due]) => { const p = projectById(id); const st = ensureAircraftState(a, p); if((st.dateDue || '') !== due){ st.dateDue = due; st.dateUpdated = d; st.timeUpdated = t; } });
+      else if(ctxAircraft){ const st = ensureAircraftState(a, ctxAircraft); st.dateDue = dateDue; applyStatusChange(a, status, reason, ctxAircraft); }
+    }else if(wasShared){
+      unshareTask(a, newOwner);
+      a.dateDue = per ? (dues[newOwner.id] || '') : dateDue;
+      if(!per) applyStatusChange(a, status, reason);
+    }else{
+      a.dateDue = dateDue;
+      applyStatusChange(a, status, reason);
+      if(toDevice) shareTask(a, newOwner);
+    }
   }else{
     a = {id: newId('a'), ref, title, details, status, dateDue, waitingSince: status === 'Waiting' ? d : '', dateCreated: d, timeCreated: t, dateUpdated: d, timeUpdated: t,
       dateCompleted: status === 'Complete' ? d : '', timeCompleted: status === 'Complete' ? t : '', comments: [],
       log: [{id: newId('s'), kind: 'entered', date: d, time: t, ts: Date.now(), to: status}]};
+    if(isDevice(newOwner)) shareTask(a, newOwner);
   }
   placeItem('tasks', a, oldOwner, newOwner);
-  closedTaskGroups.delete(taskGroupKey(taskForm.ctxId, taskGroupOf(a)));
+  const ctx = ownerById(taskForm.ctxId);
+  const shown = ctx && scopedList(ctx, 'tasks').find(x => x.item.id === a.id);
+  closedTaskGroups.delete(taskGroupKey(taskForm.ctxId, taskGroupOf(shown ? shown.item : a)));
   closeModalEl('task-modal-bg');
   await persist('Task: ' + plainSnippet(taskLabel(a), 60));
   render();
@@ -588,14 +687,18 @@ async function saveTask(){
 $('task-save-btn').addEventListener('click', saveTask);
 
 // ---- Change status (also the row's Complete and Reopen buttons): asks why; optional only when completing ----
-let statusForm = {ownerId: '', taskId: ''};
+let statusForm = {ownerId: '', taskId: '', aircraftId: ''};
 
-function openStatusModal(ownerId, taskId, preset){
-  const a = findIn(ownerById(ownerId), 'tasks', taskId);
-  if(!a) return;
-  statusForm = {ownerId, taskId};
+// aircraftId: the aircraft whose copy of a shared device task is changing (3.2.2); only that aircraft changes.
+function openStatusModal(ownerId, taskId, preset, aircraftId){
+  const t = findIn(ownerById(ownerId), 'tasks', taskId);
+  if(!t) return;
+  const p = isSharedTask(t) ? (aircraftId && projectById(aircraftId)) || projectsOf(ownerId)[0] : null;
+  if(isSharedTask(t) && !p) return;
+  const a = p ? aircraftView(t, p) : t;
+  statusForm = {ownerId, taskId, aircraftId: p ? p.id : ''};
   const from = taskGroupOf(a);
-  $('st-task').innerHTML = `${a.ref ? `<span class="tc-ref">${escapeHtml(a.ref)}</span> ` : ''}${escapeHtml(taskTitle(a))}`;
+  $('st-task').innerHTML = `${a.ref ? `<span class="tc-ref">${escapeHtml(a.ref)}</span> ` : ''}${escapeHtml(taskTitle(a))}${p && multiProject(ownerId) ? `<span class="st-aircraft">${ICON.device}<span>${escapeHtml(projectName(p))} only</span></span>` : ''}`;
   $('st-from').innerHTML = statusPill(from);
   const options = TASK_GROUPS.filter(s => s !== from);
   $('st-to').innerHTML = options.map(s => `<option value="${s}">${s === 'Complete' ? 'Completed' : s}</option>`).join('');
@@ -619,11 +722,14 @@ async function saveStatusChange(){
   if(!a) return closeModalEl('status-modal-bg');
   const to = $('st-to').value, reason = val('st-reason');
   if(to !== 'Complete' && !reason) return showErr('st-err', 'Enter why the status is changing.');
-  applyStatusChange(a, to, reason);
+  const p = statusForm.aircraftId ? projectById(statusForm.aircraftId) : null;
+  applyStatusChange(a, to, reason, p);
   const ctxId = view.type === 'device' || view.type === 'project' ? view.id : statusForm.ownerId;
-  closedTaskGroups.delete(taskGroupKey(ctxId, to));
+  const ctx = ownerById(ctxId);
+  const shown = ctx && scopedList(ctx, 'tasks').find(x => x.item.id === a.id);
+  closedTaskGroups.delete(taskGroupKey(ctxId, shown ? taskGroupOf(shown.item) : to));
   closeModalEl('status-modal-bg');
-  await persist(`Task ${to === 'Complete' ? 'completed' : 'status ' + to}: ` + plainSnippet(taskLabel(a), 60));
+  await persist(`Task ${to === 'Complete' ? 'completed' : 'status ' + to}${p && multiProject(statusForm.ownerId) ? ' (' + shortProjectLabel(p) + ')' : ''}: ` + plainSnippet(taskLabel(a), 60));
   render();
 }
 $('st-save').addEventListener('click', saveStatusChange);
@@ -640,15 +746,21 @@ function deleteTask(ownerId, taskId){
   });
 }
 
-async function addComment(ownerId, taskId){
+// aircraftId: added on that aircraft's project page, so it belongs to that aircraft; from the device page
+// it is shared by every aircraft (3.2.2).
+async function addComment(ownerId, taskId, aircraftId){
   if(addingComment) return;
   const box = $('cmt-' + taskId);
   const text = box ? box.value.trim() : '';
   if(!text){ const err = $('cmt-err-' + taskId); if(err) err.style.display = 'block'; return; }
   const a = findIn(ownerById(ownerId), 'tasks', taskId);
   if(!a) return;
-  a.comments = [...arr(a.comments), {id: 'k' + Date.now(), text, date: today(), time: nowTime()}];
-  delete commentDrafts[ownerId + '|' + taskId];
+  const cm = {id: 'k' + Date.now(), text, date: today(), time: nowTime()};
+  if(aircraftId && isSharedTask(a)) cm.projectId = aircraftId;
+  a.comments = [...arr(a.comments), cm];
+  const key = commentKey(ownerId, taskId, aircraftId);
+  delete commentDrafts[key];
+  openCommentBoxes.delete(key);
   openTasks.add(taskId);
   addingComment = true;
   try{ await persist('Comment on task: ' + plainSnippet(taskLabel(a), 60)); }finally{ addingComment = false; }

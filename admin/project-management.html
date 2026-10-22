@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.2.1">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.2.2">
 </head>
 <body>
 <div class="wrap">
@@ -30,7 +30,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.1</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.2</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <!-- Device: Add customer / Add device / Edit device -->
@@ -189,7 +189,7 @@
       <label for="a-details">Details (optional)</label>
       <textarea id="a-details" rows="3" placeholder="Background, findings, what the authority asked for"></textarea>
     </div>
-    <div class="field-row">
+    <div class="field-row" id="a-status-row">
       <div class="field">
         <label for="a-status">Status</label>
         <select id="a-status">
@@ -204,6 +204,10 @@
         <input id="a-due" type="date">
       </div>
     </div>
+    <div class="field" id="a-aircraft-field" hidden>
+      <label>Due date for each aircraft</label>
+      <div id="a-aircraft-dues" class="ac-dues"></div>
+    </div>
     <div class="field" id="a-reason-field" hidden>
       <label for="a-reason" id="a-reason-label">Why is the status changing?</label>
       <textarea id="a-reason" rows="2"></textarea>
@@ -212,6 +216,7 @@
       <label for="a-scope">Applies to</label>
       <select id="a-scope"></select>
     </div>
+    <p class="field-hint scope-note" id="a-scope-note" hidden></p>
     <div class="err" id="task-err"></div>
     <div class="modal-actions">
       <button type="button" data-close>Cancel</button>
@@ -474,9 +479,9 @@
 </div>
 
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.2.1"></script>
-<script src="../assets/projects.js?v=3.2.1"></script>
-<script src="../assets/atd.js?v=3.2.1"></script>
-<script src="../assets/editor.js?v=3.2.1"></script>
+<script src="../assets/tracker.js?v=3.2.2"></script>
+<script src="../assets/projects.js?v=3.2.2"></script>
+<script src="../assets/atd.js?v=3.2.2"></script>
+<script src="../assets/editor.js?v=3.2.2"></script>
 </body>
 </html>

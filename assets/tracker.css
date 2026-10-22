@@ -461,7 +461,7 @@ a.btn-text{text-decoration:none;}
 .tc-chev svg{width:14px;height:14px;color:var(--ink-faint);vertical-align:-2px;transition:transform 0.15s;}
 .task-row.open .tc-chev svg{transform:rotate(90deg);}
 .tc-ref{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:var(--fs-sm);color:var(--ink-soft);}
-.tc-title{font-weight:600;color:var(--ink);}
+.tc-title{font-weight:400;color:var(--ink);}   /* 3.2.2: regular weight */
 .task-table.done .tc-title{font-weight:400;color:var(--ink-soft);}
 .tc-due,.tc-cm{font-size:var(--fs-sm);color:var(--ink-soft);}
 .tc-due .pill{margin-right:5px;}
@@ -516,6 +516,42 @@ a.btn-text{text-decoration:none;}
 .st-change .pill{margin-right:0;}
 .field-row .field.field-ref{flex:0 0 140px;}
 @media (max-width: 520px){ .field-row .field.field-ref{flex:1 1 auto;} }
+
+/* ===== 3.2.2: shared device tasks per aircraft, Add comment link ===== */
+.field-row[hidden],.field[hidden],.scope-note[hidden]{display:none !important;}
+.task-aircraft td{padding:0 8px 8px;white-space:normal;overflow:visible;cursor:default;}
+.task-row:has(+ .task-aircraft) td{border-bottom-color:transparent;}
+.task-row.open + .task-aircraft td{background:var(--thread-bg);}
+.ac-lines{display:flex;flex-direction:column;gap:2px;border-left:3px solid var(--navy);padding:2px 0 2px 10px;margin-left:84px;}
+.ac-line{display:grid;grid-template-columns:minmax(110px,max-content) minmax(0,1fr) auto;gap:10px;align-items:center;padding:3px 0;font-size:var(--fs-sm);}
+.ac-name{font-size:var(--fs-sm);text-align:left;justify-self:start;}
+.ac-state{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--ink-soft);}
+.ac-state .pill{margin-right:0;}
+.ac-due .pill{margin-right:5px;}
+.ac-btns{display:flex;align-items:center;gap:10px;justify-self:end;}
+.ac-change{font-size:var(--fs-sm);}
+.ac-btns .task-btn{height:26px;}
+.ac-dues{display:flex;flex-direction:column;gap:6px;}
+.ac-due-row{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:10px;align-items:center;}
+.ac-due-row label{margin:0 !important;font-size:var(--fs-sm);color:var(--ink);}
+.scope-note{margin:-4px 0 10px;}
+.st-aircraft{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:var(--fs-sm);font-weight:700;color:var(--navy-ink);}
+.st-aircraft svg{width:15px;height:15px;}
+.add-comment{display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:var(--fs-sm);text-decoration:none;}
+.add-comment:hover{text-decoration:underline;}
+.add-comment svg{width:14px;height:14px;}
+.comment-add-btns{display:flex;gap:6px;flex-shrink:0;}
+.comment-add-btns button{height:38px;padding:0 14px;}
+.comment-note{font-size:var(--fs-xs);color:var(--ink-faint);margin-top:4px;}
+.act-body .scope-tag{margin-left:0;}
+@media (max-width: 640px){
+  .task-aircraft{display:block;}
+  .task-aircraft td{display:block;padding:0 10px 10px 28px;}
+  .task-aircraft td:first-child{display:none;}
+  .ac-lines{margin-left:0;}
+  .ac-line{grid-template-columns:minmax(0,1fr) auto;}
+  .ac-state{grid-column:1 / -1;grid-row:2;}
+}
 
 /* ===== Regulatory Library ===== */
 .lib-groups{margin-top:4px;}
