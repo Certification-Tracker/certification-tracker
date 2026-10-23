@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.2.3">
+<link rel="stylesheet" href="assets/tracker.css?v=3.2.4">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,18 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.2.4">
+        <h2 class="vh"><span class="vn">v3.2.4</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>The sidebar's Projects badge appears only when an open project is overdue, and reads "n overdue" (the number alone on the collapsed icon strip, with "overdue projects" on hover). It no longer shows a count of open tasks.</li>
+          <li>The Projects page title shows the number of open projects, with the total and completed count underneath.</li>
+          <li>In an opened task, Edit, Change status and Delete sit with the task, under its details and dates and above Activity. Add comment stays at the end of Activity.</li>
+          <li>ATD Approvals uses three expiry tags instead of four, matching ATD QAG/LOA Status: Current (more than 365 days to expiry), Expires Soon (365 days or less, replacing Yellow and Red) and Expired. This applies to the ATD Approvals table, device pages, the home page's ATD Approvals card and the legend. Incomplete, Pending and Resubmit by (180 days before expiry) are unchanged.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.2.3">
-        <h2 class="vh"><span class="vn">v3.2.3</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.2.3</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Added</h3>
         <ul>
           <li>Project status can be set by hand. Each aircraft project's status is still worked out from its tasks (In Progress, On Track, No Tasks) unless you choose one with Set status on its project page: Not Started, In Progress, Waiting, On Hold or Completed. Choosing Automatic goes back to the status from the tasks.</li>
@@ -205,7 +215,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.2.3</div>
+  <div class="version-footer">v3.2.4</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

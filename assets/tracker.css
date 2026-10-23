@@ -284,6 +284,7 @@ a.btn-text{text-decoration:none;}
 .nav-badge{flex-shrink:0;min-width:20px;padding:1px 6px;border-radius:99px;background:var(--slate);color:#FFFFFF;font-family:var(--sans);font-size:var(--fs-2xs);font-weight:700;line-height:16px;text-align:center;}
 .nav-badge.late{background:var(--alert);}
 .nav-badge.gold{background:var(--gold);}
+.nav-badge.wide{padding:1px 8px;white-space:nowrap;}   /* 3.2.4: "2 overdue" */
 @media (prefers-color-scheme: dark){ .nav-badge{color:#1A1F23;} .nav-badge.late{color:#FFFFFF;background:#E24B4A;} }
 .side-collapse{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:none;border-radius:8px;background:none;color:var(--ink-faint);}
 .side-collapse:hover{background:var(--hover);color:var(--ink);}

@@ -10,8 +10,7 @@ let atdSha = null;
 let atdLoaded = false;
 let kbStatus = null;
 
-const ATD_YELLOW_DAYS = 365;     // 180-365 days to expiry
-const ATD_RED_DAYS = 180;        // under 180 days
+const ATD_SOON_DAYS = 365;       // 3.2.4: Expires Soon at 365 days or less to expiry (was Yellow and Red)
 const ATD_RESUBMIT_DAYS = 180;   // resubmittals projected 180 days out
 
 function dataDir(){ return libraryPath().replace(/library\.json$/, ''); }
@@ -80,15 +79,15 @@ function atdBand(d){
   if(atdIncomplete(d)) return 'incomplete';
   const n = atdDays(d);
   if(n < 0) return 'expired';
-  if(n < ATD_RED_DAYS) return 'red';
-  if(n <= ATD_YELLOW_DAYS) return 'yellow';
-  return 'green';
+  if(n <= ATD_SOON_DAYS) return 'soon';
+  return 'current';
 }
 
+// Three expiry tags (3.2.4), matching ATD QAG/LOA Status; Incomplete is for devices not yet approved.
+const ATD_BAND_ORDER = ['current', 'soon', 'expired', 'incomplete'];
 const ATD_BANDS = {
-  green:      {label: 'Green', cls: 'sage', hint: 'More than 365 days to expiry'},
-  yellow:     {label: 'Yellow', cls: 'gold', hint: '180 to 365 days to expiry'},
-  red:        {label: 'Red', cls: 'overdue', hint: 'Under 180 days to expiry'},
+  current:    {label: 'Current', cls: 'sage', hint: 'More than 365 days to expiry'},
+  soon:       {label: 'Expires Soon', cls: 'gold', hint: '365 days or less to expiry'},
   expired:    {label: 'Expired', cls: 'overdue', hint: 'Past its expiration date'},
   incomplete: {label: 'Incomplete', cls: 'neutral', hint: 'Not yet approved'}
 };
@@ -176,9 +175,9 @@ function renderKbBehindNotice(){
 // Home page card (one of the home summary cards; see renderHome in tracker.js).
 function renderAtdHome(){
   if(!atdLoaded || !atd.devices.length) return '';
-  const counts = {green: 0, yellow: 0, red: 0, expired: 0, incomplete: 0};
+  const counts = {current: 0, soon: 0, expired: 0, incomplete: 0};
   atd.devices.forEach(d => counts[atdBand(d)]++);
-  const warn = atdSorted(atd.devices.filter(d => ['yellow', 'red', 'expired'].includes(atdBand(d))));
+  const warn = atdSorted(atd.devices.filter(d => ['soon', 'expired'].includes(atdBand(d))));
   const next = atdSorted(atd.devices.filter(d => !atdIncomplete(d) && !atdPending(d)))[0];
   const pending = atdOrdered(atd.devices.filter(atdPending));
   const chip = (n, label, cls) => `<span class="pill pill-${n ? cls : 'neutral'}">${n} ${label}</span>`;
@@ -189,7 +188,7 @@ function renderAtdHome(){
     ...(next && !warn.includes(next) ? [homeRow([['Next resubmit', 'neutral']], escapeHtml(next.name), 'by ' + fmtDate(atdResubmitBy(next)), act(next))] : [])
   ];
   return homeCard('ATD Approvals', `<button class="text-link" type="button" onclick="openAtd()">Open ATD Approvals ${ICON.arrowRight}</button>`,
-    `<div class="atd-chips home-chips">${chip(counts.green, 'green', 'sage')}${chip(counts.yellow, 'yellow', 'gold')}${chip(counts.red + counts.expired, 'red', 'overdue')}${counts.incomplete ? chip(counts.incomplete, 'incomplete', 'neutral') : ''}</div>${rows.join('')}`);
+    `<div class="atd-chips home-chips">${chip(counts.current, 'Current', 'sage')}${chip(counts.soon, 'Expires Soon', 'gold')}${chip(counts.expired, 'Expired', 'overdue')}${counts.incomplete ? chip(counts.incomplete, 'Incomplete', 'neutral') : ''}</div>${rows.join('')}`);
 }
 
 // The ATD Approvals page.
@@ -233,9 +232,9 @@ function renderAtdView(){
     ${renderKbBehindNotice()}
     ${sb.length ? `<div class="reg-note update"><strong>Spreadsheet behind the knowledge base on ${countLabel(sb.length, 'device', 'devices')}:</strong> ${sb.map(d => `${escapeHtml(d.name)} (${kbDiffs(d, 'sheet-behind').map(x => `${escapeHtml(x.label)} ${escapeHtml(x.kb)} on the KB`).join(', ')})`).join('; ')}. Update FAA_Approval_Tracker.xlsx and import it again.</div>` : ''}
     ${notFound.length ? `<div class="reg-note muted-note">Not found in the knowledge base: ${notFound.map(d => escapeHtml(d.name)).join(', ')}. Open a device and use Edit to add its article link.</div>` : ''}
-    <div class="atd-chips">${['green', 'yellow', 'red', 'expired', 'incomplete'].filter(b => counts[b]).map(b => `<span class="pill pill-${ATD_BANDS[b].cls}" title="${ATD_BANDS[b].hint}">${counts[b]} ${ATD_BANDS[b].label.toLowerCase()}</span>`).join('')}${list.filter(atdPending).length ? `<span class="pill pill-slate">${list.filter(atdPending).length} pending</span>` : ''}</div>
+    <div class="atd-chips">${ATD_BAND_ORDER.filter(b => counts[b]).map(b => `<span class="pill pill-${ATD_BANDS[b].cls}" title="${ATD_BANDS[b].hint}">${counts[b]} ${ATD_BANDS[b].label}</span>`).join('')}${list.filter(atdPending).length ? `<span class="pill pill-slate">${list.filter(atdPending).length} pending</span>` : ''}</div>
     ${body}
-    <div class="muted search-note">BATD first, then AATD; FMX/MCX at the top of AATD, the rest alphabetical. Green: over 365 days to expiry; yellow: 180 to 365; red: under 180. Resubmit by is 180 days before expiry.</div>`;
+    <div class="muted search-note">BATD first, then AATD; FMX/MCX at the top of AATD, the rest alphabetical. Current: over 365 days to expiry; Expires Soon: 365 days or less; Expired: past the expiry date. Resubmit by is 180 days before expiry.</div>`;
 }
 
 // One device: approval details, then its LOA and QAG from the knowledge base in the main panel.

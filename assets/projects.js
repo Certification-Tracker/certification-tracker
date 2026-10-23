@@ -136,8 +136,8 @@ function renderProjectsView(){
   return `
     <div class="detail-head">
       <div>
-        <h2 class="detail-title">Projects <span class="title-count">(${projects.length})</span></h2>
-        <div class="doc-meta">${countLabel(projects.filter(p => !p.completed).length, 'open project', 'open projects')} · ${countLabel(customers, 'customer', 'customers')} · ${countLabel(devices.length, 'device', 'devices')} · by regulatory authority</div>
+        <h2 class="detail-title">Projects <span class="title-count">(${projects.filter(p => !p.completed).length} open)</span></h2>
+        <div class="doc-meta">${countLabel(projects.length, 'project', 'projects')} in all, ${projects.filter(p => p.completed).length} completed · ${countLabel(customers, 'customer', 'customers')} · ${countLabel(devices.length, 'device', 'devices')} · by regulatory authority</div>
       </div>
     </div>
     <div class="detail-actions doc-actions">
@@ -605,12 +605,12 @@ function renderTaskRow(x, ctx){
     ${open ? `<tr class="task-more"><td class="tc-chev"></td><td colspan="${cols - 1}">
       ${a.details ? `<div class="task-details rich-text">${formatText(a.details)}</div>` : ''}
       <div class="entry-meta">${meta}</div>
-      ${renderActivity(owner, a)}
       ${EDITOR ? `<div class="task-actions">
         ${actionBtn('edit', 'Edit', `openTaskModal('${ctx.id}', '${owner.id}', '${a.id}')`, {compact: false})}
         ${lines ? '' : actionBtn('reopen', 'Change status', `openStatusModal('${owner.id}', '${a.id}', '', '${air}')`, {compact: false})}
         ${actionBtn('trash', 'Delete', `deleteTask('${owner.id}', '${a.id}')`, {cls: 'danger', compact: false})}
       </div>` : ''}
+      ${renderActivity(owner, a)}
     </td></tr>` : ''}`;
 }
 

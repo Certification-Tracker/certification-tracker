@@ -5,7 +5,7 @@
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.2.3';
+const VERSION = 'v3.2.4';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
@@ -587,15 +587,15 @@ function setSidebarCollapsed(on){
 }
 
 function navItems(){
-  const open = allTasks().filter(x => taskGroupOf(x.a) !== 'Complete');
-  const late = open.filter(x => isTaskOverdue(x.a)).length;
+  // Projects badge (3.2.4): only when an open project is overdue, labelled "n overdue" so it isn't read as a project count.
+  const late = projects.filter(p => !p.completed && projectHasOverdue(p)).length;
   const ups = regUpdates().length;
   const behind = EDITOR && atdLoaded ? kbBehind().length : 0;
   const t = view.type;
   return [
     {label: 'Home', icon: ICON.home, onclick: 'goHome()', active: t === 'home'},
     {label: 'Projects', icon: ICON.cert, onclick: 'openProjects()', active: ['projects', 'device', 'project', 'doc'].includes(t),
-      badge: open.length ? {n: open.length, cls: late ? 'late' : '', title: countLabel(open.length, 'open task', 'open tasks') + (late ? `, ${late} overdue` : '')} : null},
+      badge: late ? {n: late, text: `${late} overdue`, cls: 'late', title: countLabel(late, 'overdue project', 'overdue projects')} : null},
     atdLoaded && atd.devices.length ? {label: 'ATD Approvals', icon: ICON.device, onclick: 'openAtd()', active: t === 'atd' || t === 'atd-dev',
       badge: behind ? {n: behind, cls: 'late', title: 'Knowledge base behind the spreadsheet'} : null} : null,
     {label: 'Regulatory Library', icon: ICON.books, onclick: 'openLibrary()', active: t === 'library' || t === 'reg',
@@ -605,12 +605,13 @@ function navItems(){
 
 function renderSidebar(){
   const items = navItems();
-  const badge = b => b ? `<span class="nav-badge ${b.cls}" title="${b.title}">${b.n}</span>` : '';
+  // full: the sidebar's own wording (e.g. "2 overdue"); the collapsed strip has room for the number only.
+  const badge = (b, full) => b ? `<span class="nav-badge ${b.cls}${full && b.text ? ' wide' : ''}" title="${b.title}">${full && b.text ? b.text : b.n}</span>` : '';
   if(sidebarIsCollapsed()){
     return `<button class="strip-btn strip-toggle" type="button" onclick="setSidebarCollapsed(false)" title="Expand sidebar" aria-label="Expand sidebar" aria-expanded="false">${ICON.chevronsRight}</button>`
       + items.map(it => `<button class="strip-btn ${it.active ? 'active' : ''}" type="button" onclick="${it.onclick}" title="${it.label}${it.badge ? ' \u00b7 ' + it.badge.title : ''}" aria-label="${it.label}" ${it.active ? 'aria-current="page"' : ''}>${it.icon}${badge(it.badge)}</button>`).join('');
   }
-  const btn = it => `<button class="side-nav ${it.active ? 'active' : ''}" type="button" onclick="${it.onclick}" ${it.active ? 'aria-current="page"' : ''}>${it.icon}<span class="side-nav-label">${it.label}</span>${badge(it.badge)}</button>`;
+  const btn = it => `<button class="side-nav ${it.active ? 'active' : ''}" type="button" onclick="${it.onclick}" ${it.active ? 'aria-current="page"' : ''}>${it.icon}<span class="side-nav-label">${it.label}</span>${badge(it.badge, true)}</button>`;
   return `
     <div class="side-top">${btn(items[0])}<button class="side-collapse" type="button" onclick="setSidebarCollapsed(true)" title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">${ICON.chevronsLeft}</button></div>
     ${items.slice(1).map(btn).join('')}`;
