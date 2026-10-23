@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.2.4">
+<link rel="stylesheet" href="assets/tracker.css?v=3.3.0">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,21 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.3.0">
+        <h2 class="vh"><span class="vn">v3.3.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>The editor can be installed from Edge or Chrome as the Certification Tracker Editor app, with its own window, taskbar icon and Start menu entry. It keeps the access key already saved in the browser, and can be set to start when you sign in to Windows. Admin has an Install app button and a Desktop app and reminders section.</li>
+          <li>When the app starts, it asks whether to enable weekday reminders at 8:00 AM listing tasks due in the next 3 days (Windows notification and a taskbar badge): Enable, Snooze for 7 days, or Don't ask again.</li>
+          <li>Reminder pop-up at the reminder time, listing overdue tasks and tasks due in the look-ahead, soonest first, with a "No due date" line. Each row opens its task. A reminder missed while the app was closed or the computer was asleep shows when the app next runs that day.</li>
+          <li>Reminder settings (from the pop-up, or Admin): reminders on or off, time, days, look ahead (1 to 30 days), the "No due date" line, Windows notification, taskbar badge, and Show on lock screen. Settings are kept per computer.</li>
+          <li>Show on lock screen is off by default: a reminder that comes while the computer is locked waits until you unlock it. Turned on, it also needs lock-screen notifications on in Windows, with an Open Windows settings link.</li>
+          <li>The taskbar badge shows the number of overdue tasks and tasks due in the look-ahead, and updates as tasks change.</li>
+          <li>App icon: a red round clipboard with two checkmarks, also used as the editor's browser tab icon.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.2.4">
-        <h2 class="vh"><span class="vn">v3.2.4</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.2.4</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Changed</h3>
         <ul>
           <li>The sidebar's Projects badge appears only when an open project is overdue, and reads "n overdue" (the number alone on the collapsed icon strip, with "overdue projects" on hover). It no longer shows a count of open tasks.</li>
@@ -215,7 +228,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.2.4</div>
+  <div class="version-footer">v3.3.0</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

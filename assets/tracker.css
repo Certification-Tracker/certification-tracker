@@ -750,3 +750,56 @@ body.atd-drop-page #detail::after{content:'Drop the spreadsheet to import it';po
 .cv-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:var(--fs-sm);}
 .cv-table th{text-align:left;font-size:var(--fs-2xs);font-weight:600;color:var(--ink-faint);padding:3px 6px;border-bottom:1px solid var(--line);}
 .cv-table td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere;}
+
+/* ===== Editor app (3.3.0): startup prompt, reminder pop-up, reminder settings ===== */
+.modal.modal-narrow{max-width:min(440px, 92vw);}
+.sp-head{display:flex;gap:12px;align-items:flex-start;}
+.sp-bell{flex:none;width:34px;height:34px;border-radius:50%;background:var(--neutral-bg);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;}
+.sp-bell svg{width:18px;height:18px;}
+.sp-question{margin:0 0 4px;font-size:var(--fs-body);font-weight:700;color:var(--ink);line-height:1.45;}
+.sp-sub{margin:0;font-size:var(--fs-sm);color:var(--ink-soft);}
+.sp-gap{flex:1;}
+.sp-actions{flex-wrap:wrap;}
+.sp-never{color:var(--ink-faint);text-decoration:none;}
+.sp-never:hover{color:var(--ink);text-decoration:underline;}
+.rem-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+.rem-head h3{margin:0;}
+.rem-when{font-size:var(--fs-xs);color:var(--ink-faint);}
+.rem-list{max-height:min(60vh, 520px);overflow-y:auto;border-top:1px solid var(--line);}
+.rem-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:none;border-bottom:1px solid var(--line);background:none;padding:9px 4px;text-align:left;color:var(--ink);cursor:pointer;}
+.rem-row:hover{background:var(--hover);}
+.rem-main{display:flex;flex-direction:column;min-width:0;}
+.rem-task{font-size:var(--fs-body);overflow-wrap:anywhere;}
+.rem-where{font-size:var(--fs-xs);color:var(--ink-faint);}
+.rem-muted{color:var(--ink-soft);}
+.rem-side{flex:none;font-size:var(--fs-sm);color:var(--ink-soft);white-space:nowrap;}
+.rem-today{color:var(--rust);font-weight:700;}
+.rem-empty{margin:12px 4px;color:var(--ink-soft);font-size:var(--fs-body);}
+.rem-actions{flex-wrap:wrap;}
+.rem-settings{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-sm);color:var(--action-ink);text-decoration:none;}
+.rem-settings:hover{text-decoration:underline;}
+.rem-settings svg{width:15px;height:15px;}
+.rs-perm{background:var(--gold-bg);color:var(--gold);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:var(--fs-sm);}
+.rs-perm p{margin:2px 0;}
+.rs-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:var(--fs-ui);color:var(--ink);cursor:pointer;}
+.rs-row-last{border-bottom:none;padding-bottom:4px;}
+.rs-input{font-family:var(--sans);font-size:var(--fs-input);padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--field-bg);color:var(--ink);}
+#rs-time{width:130px;}
+#rs-ahead{width:70px;}
+.rs-ahead{display:inline-flex;align-items:center;gap:6px;color:var(--ink-soft);font-size:var(--fs-sm);}
+.rs-days{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;}
+.rs-days label{cursor:pointer;}
+.rs-days input{position:absolute;opacity:0;width:1px;height:1px;}
+.rs-days span{display:inline-block;font-size:var(--fs-xs);padding:4px 8px;border-radius:8px;border:1px solid var(--line-strong);color:var(--ink-soft);}
+.rs-days input:checked + span{background:var(--accent);border-color:var(--accent);color:#FFFFFF;}
+.rs-days input:focus-visible + span{outline:2px solid var(--action-ink);outline-offset:1px;}
+.rs-switch{appearance:none;-webkit-appearance:none;flex:none;width:38px;height:22px;border-radius:11px;background:var(--line-strong);position:relative;cursor:pointer;margin:0;transition:background .15s;}
+.rs-switch::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#FFFFFF;transition:left .15s;}
+.rs-switch:checked{background:var(--accent);}
+.rs-switch:checked::after{left:19px;}
+.rs-switch:focus-visible{outline:2px solid var(--action-ink);outline-offset:2px;}
+.rs-note{margin:2px 0 8px;line-height:1.45;}
+.rs-note a{color:var(--action-ink);}
+.rs-allow{height:28px;padding:0 10px;margin-left:4px;}
+.rs-off{opacity:0.5;}
+.rs-off .rs-row,.rs-off input{cursor:default;}

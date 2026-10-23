@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Certification Tracker — Editor</title>
-<link rel="stylesheet" href="../assets/tracker.css?v=3.2.4">
+<link rel="stylesheet" href="../assets/tracker.css?v=3.3.0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="theme-color" content="#A70E13">
 </head>
 <body>
 <div class="wrap">
@@ -30,7 +35,7 @@
   <div id="sync-banner" class="sync-banner" style="display:none;"></div>
 
   <div id="list"><div class="loading">Loading&hellip;</div></div>
-  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.2.4</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
+  <div class="version-footer"><a href="../changelog.html" title="Change log">v3.3.0</a><a class="archive-link" href="#history" onclick="navigate({type: 'history'}); return false;" title="Earlier versions of the projects data, with restore">Version history</a><a class="archive-link" href="#v2-changelog" onclick="navigate({type: 'v2log'}); return false;" title="Change log of the v2 tracker (editor only)">v2 change log</a><a class="archive-link" href="https://github.com/wjen5116/Certification-Projects/commits/main" target="_blank" rel="noopener" title="Commit history of the archived v2 tracker (private)">v2 revision history</a></div>
 </div>
 
 <!-- Device: Add customer / Add device / Edit device -->
@@ -475,6 +480,10 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="admin-title">
     <h3 id="admin-title">Admin</h3>
     <div class="admin-section">
+      <h4>Desktop app and reminders</h4>
+      <div id="admin-app-body"></div>
+    </div>
+    <div class="admin-section">
       <h4>Version history</h4>
       <p>Every save of the projects data is kept on GitHub. See what changed between versions and restore an earlier one.</p>
       <button class="btn-text" id="admin-history-btn" type="button">Open version history</button>
@@ -496,10 +505,77 @@
   </div>
 </div>
 
+<!-- Editor app (3.3.0): startup prompt, reminder pop-up and reminder settings -->
+<div class="modal-bg" id="startup-modal-bg">
+  <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="sp-question">
+    <div class="sp-head">
+      <span class="sp-bell" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <div>
+        <p class="sp-question" id="sp-question">Enable weekday reminders at 8:00 AM listing tasks due in the next 3 days?</p>
+        <p class="sp-sub">(Windows notification and a taskbar badge)</p>
+      </div>
+    </div>
+    <div class="modal-actions sp-actions">
+      <button class="danger-link sp-never" id="sp-never" type="button">Don't ask again</button>
+      <span class="sp-gap"></span>
+      <button id="sp-snooze" type="button">Snooze for 7 days</button>
+      <button class="btn-primary" id="sp-enable" type="button">Enable</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="reminder-modal-bg">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rem-title">
+    <div class="rem-head">
+      <h3 id="rem-title">Due in the next 3 days</h3>
+      <span class="rem-when" id="rem-when"></span>
+    </div>
+    <div class="rem-list" id="rem-list"></div>
+    <div class="modal-actions rem-actions">
+      <a href="#" class="rem-settings" id="rem-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Reminder settings</a>
+      <span class="sp-gap"></span>
+      <button class="btn-primary" id="rem-dismiss" type="button" data-close>Dismiss</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="reminder-settings-bg">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rs-title">
+    <h3 id="rs-title">Reminder settings</h3>
+    <p class="modal-intro">Saved on this computer only.</p>
+    <div class="rs-perm" id="rs-perm" hidden></div>
+    <label class="rs-row"><span>Reminders</span><input type="checkbox" class="rs-switch" id="rs-enabled"></label>
+    <div id="rs-details">
+      <label class="rs-row"><span>Time</span><input type="time" id="rs-time" class="rs-input"></label>
+      <div class="rs-row"><span>Days</span>
+        <span class="rs-days" id="rs-days">
+          <label><input type="checkbox" value="1"><span>Mon</span></label><label><input type="checkbox" value="2"><span>Tue</span></label><label><input type="checkbox" value="3"><span>Wed</span></label><label><input type="checkbox" value="4"><span>Thu</span></label><label><input type="checkbox" value="5"><span>Fri</span></label><label><input type="checkbox" value="6"><span>Sat</span></label><label><input type="checkbox" value="0"><span>Sun</span></label>
+        </span>
+      </div>
+      <label class="rs-row"><span>Look ahead</span><span class="rs-ahead"><input type="number" id="rs-ahead" class="rs-input" min="1" max="30" step="1"> days</span></label>
+      <label class="rs-row"><span>Include “No due date” line</span><input type="checkbox" class="rs-switch" id="rs-nodue"></label>
+      <label class="rs-row"><span>Windows notification</span><input type="checkbox" class="rs-switch" id="rs-notify"></label>
+      <label class="rs-row"><span>Taskbar badge</span><input type="checkbox" class="rs-switch" id="rs-badge"></label>
+      <div id="rs-lock-row">
+        <label class="rs-row rs-row-last"><span>Show on lock screen</span><input type="checkbox" class="rs-switch" id="rs-lock"></label>
+        <p class="field-hint rs-note">When off, a reminder that comes while your computer is locked waits until you unlock it. When on, it also needs lock-screen notifications turned on in Windows. <a href="ms-settings:notifications">Open Windows settings</a></p>
+        <p class="field-hint rs-note" id="rs-lock-allow" hidden>To hold reminders while the screen is locked, the app needs to know when it's locked. <button class="btn-text rs-allow" id="rs-lock-allow-btn" type="button">Allow</button></p>
+        <p class="field-hint rs-note" id="rs-lock-denied" hidden>The app isn't allowed to tell when the screen is locked, so reminders show as Windows allows. You can change this in the app's site permissions.</p>
+      </div>
+    </div>
+    <div class="err" id="rs-err"></div>
+    <div class="modal-actions">
+      <button type="button" data-close>Cancel</button>
+      <button class="btn-primary" id="rs-save" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>window.TRACKER_EDITOR = true;</script>
-<script src="../assets/tracker.js?v=3.2.4"></script>
-<script src="../assets/projects.js?v=3.2.4"></script>
-<script src="../assets/atd.js?v=3.2.4"></script>
-<script src="../assets/editor.js?v=3.2.4"></script>
+<script src="../assets/tracker.js?v=3.3.0"></script>
+<script src="../assets/projects.js?v=3.3.0"></script>
+<script src="../assets/atd.js?v=3.3.0"></script>
+<script src="../assets/editor.js?v=3.3.0"></script>
+<script src="../assets/reminders.js?v=3.3.0"></script>
 </body>
 </html>

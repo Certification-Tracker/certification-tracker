@@ -1,11 +1,11 @@
 // =====================================================================
 // Certification Tracker — shared code for the view-only page and the editor.
 // Load order: tracker.js (this file: data, layout, home, lists, search, Regulatory Library),
-// projects.js (Projects pages), atd.js (ATD Approvals), then editor.js on the editor page.
+// projects.js (Projects pages), atd.js (ATD Approvals), then editor.js and reminders.js (editor app, 3.3.0) on the editor page.
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.2.4';
+const VERSION = 'v3.3.0';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
