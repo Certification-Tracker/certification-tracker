@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change log — Certification Tracker</title>
-<link rel="stylesheet" href="assets/tracker.css?v=3.3.0">
+<link rel="stylesheet" href="assets/tracker.css?v=3.3.1">
 <style>
   /* Change log page: shared colors and base styles come from assets/tracker.css. */
   body{padding:0;line-height:1.5;}
@@ -36,8 +36,19 @@
     <button class="back" id="back-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tracker</button>
   </header>
   <main class="card">
+      <section class="ver" id="v3.3.1">
+        <h2 class="vh"><span class="vn">v3.3.1</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h3 class="grp">Added</h3>
+        <ul>
+          <li>Task tables can be sorted by Ref, Task or Due / status. Click a column heading to sort ascending, again for descending, and a third time to go back to reference order (the default). Each status group sorts on its own, and the sort is remembered in this browser for every page. Completed tasks sort by completion date; tasks with no date stay at the end.</li>
+        </ul>
+        <h3 class="grp">Changed</h3>
+        <ul>
+          <li>A task's Activity lists the newest entry first. Add comment sits at the top, next to the Activity heading, so a new comment appears right under it.</li>
+        </ul>
+      </section>
       <section class="ver" id="v3.3.0">
-        <h2 class="vh"><span class="vn">v3.3.0</span> <span class="vd">Oct 2026</span> <span class="cur">Current</span></h2>
+        <h2 class="vh"><span class="vn">v3.3.0</span> <span class="vd">Oct 2026</span></h2>
         <h3 class="grp">Added</h3>
         <ul>
           <li>The editor can be installed from Edge or Chrome as the Certification Tracker Editor app, with its own window, taskbar icon and Start menu entry. It keeps the access key already saved in the browser, and can be set to start when you sign in to Windows. Admin has an Install app button and a Desktop app and reminders section.</li>
@@ -228,7 +239,7 @@
         </ul>
       </section>
   </main>
-  <div class="version-footer">v3.3.0</div>
+  <div class="version-footer">v3.3.1</div>
 </div>
 <script>
 // Return to whichever tracker page opened this one; otherwise go to the view-only page.

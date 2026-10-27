@@ -418,8 +418,9 @@ function renderDocHistory(ctx){
 // ---- Tasks (3.2.1) ----
 // One frame per status (Not Started, In Progress, Waiting, Completed), open unless folded. Each task is a row
 // (reference, title, due or status, comment count, Complete/Reopen); clicking it opens the details and its
-// Activity: status changes with their reasons and comments, oldest first.
+// Activity: status changes with their reasons and comments, newest first (3.3.1).
 // Rows sort by reference in natural order (6.1.C.9 before 6.1.C.10); tasks without one follow by due date, then entered.
+// Ref, Task and Due / status headers re-sort a group (3.3.1).
 const taskEnteredKey = a => (a.dateCreated || '') + to24(a.timeCreated);
 function taskSortCmp(x, y){
   const a = x.item, b = y.item;
@@ -427,10 +428,58 @@ function taskSortCmp(x, y){
     || dateCmp(a.dateDue, b.dateDue) || taskEnteredKey(a).localeCompare(taskEnteredKey(b));
 }
 
+// Sortable columns (3.3.1): Ref, Task and Due / status. Each status group sorts on its own; a click sorts
+// ascending, a second descending, a third goes back to reference order. Kept per browser for every page.
+const TASK_SORT_KEY = 'cert-tracker-task-sort';
+let taskSorts = {};
+try{ taskSorts = JSON.parse(localStorage.getItem(TASK_SORT_KEY) || '{}') || {}; }catch(e){ taskSorts = {}; }
+const TASK_SORT_COLS = {ref: 'Ref', title: 'Task', due: 'Due / status'};
+
+function setTaskSort(status, col){
+  const cur = taskSorts[status];
+  if(!cur || cur.col !== col) taskSorts[status] = {col, dir: 'asc'};
+  else if(cur.dir === 'asc') taskSorts[status] = {col, dir: 'desc'};
+  else delete taskSorts[status];
+  try{ localStorage.setItem(TASK_SORT_KEY, JSON.stringify(taskSorts)); }catch(e){}
+  render();
+}
+
+// Completed tasks sort by completion date, open ones by due date; tasks without a date stay last either way.
+function taskSortFor(status){
+  const s = taskSorts[status];
+  if(!s || !TASK_SORT_COLS[s.col]) return taskSortCmp;
+  const sign = s.dir === 'desc' ? -1 : 1;
+  const dateOf = a => status === 'Complete' ? (a.dateCompleted || '') : (a.dateDue || '');
+  return (x, y) => {
+    const a = x.item, b = y.item;
+    let c = 0;
+    if(s.col === 'ref'){
+      c = (a.ref ? 0 : 1) - (b.ref ? 0 : 1);
+      if(!c && a.ref && b.ref) c = sign * textCmp(a.ref, b.ref);
+    }else if(s.col === 'title'){
+      c = sign * textCmp(taskTitle(a), taskTitle(b));
+    }else{
+      const da = dateOf(a), db = dateOf(b);
+      c = (da ? 0 : 1) - (db ? 0 : 1);
+      if(!c && da && db) c = sign * da.localeCompare(db);
+    }
+    return c || taskSortCmp(x, y);
+  };
+}
+
 function taskGroups(ctx){
   const entries = scopedList(ctx, 'tasks');
-  return TASK_GROUPS.map(status => ({status, items: entries.filter(x => taskGroupOf(x.item) === status).sort(taskSortCmp)}))
+  return TASK_GROUPS.map(status => ({status, items: entries.filter(x => taskGroupOf(x.item) === status).sort(taskSortFor(status))}))
     .filter(g => g.items.length);
+}
+
+function taskSortHead(status, col){
+  const s = taskSorts[status];
+  const on = s && s.col === col;
+  const arrow = on ? (s.dir === 'asc' ? '▲' : '▼') : '';
+  const next = !on ? 'ascending' : s.dir === 'asc' ? 'descending' : 'reference order';
+  const aria = on ? (s.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  return `<th aria-sort="${aria}"><button class="th-sort${on ? ' on' : ''}" type="button" title="Sort by ${TASK_SORT_COLS[col]} (${next})" onclick="setTaskSort('${status}', '${col}')">${TASK_SORT_COLS[col]}<span class="th-arrow" aria-hidden="true">${arrow}</span></button></th>`;
 }
 
 const statusPill = s => `<span class="pill pill-${taskStatusClass(s)}">${s === 'Complete' ? 'Completed' : escapeHtml(s)}</span>`;
@@ -464,13 +513,13 @@ function toggleTaskRow(taskId){
   render();
 }
 
-// Status changes and comments together, oldest first.
+// Status changes and comments together, newest first (3.3.1; was oldest first).
 function taskActivity(a){
   const key = (date, time, ts) => (date || '') + '|' + (to24(time) || '00:00') + '|' + String(ts || 0).padStart(14, '0');
   return [
     ...arr(a.log).map(e => ({kind: 'log', e, k: key(e.date, e.time, e.ts)})),
     ...arr(a.comments).map(cm => ({kind: 'comment', e: cm, k: key(cm.date, cm.time, Number(String(cm.id || '').replace(/\D/g, '').slice(0, 13)) || 0)}))
-  ].sort((x, y) => x.k.localeCompare(y.k));
+  ].sort((x, y) => y.k.localeCompare(x.k));
 }
 
 // Who an Activity item belongs to on a shared device task (3.2.2): on the device page every item is tagged with
@@ -530,15 +579,19 @@ function renderActivity(owner, a){
   const key = commentKey(owner.id, a.id, air);
   const args = `'${owner.id}', '${a.id}', '${air}'`;
   const note = a.lines && multiProject(owner.id) ? '<div class="comment-note">Shared: shows on every aircraft’s project page.</div>' : '';
-  const form = !EDITOR ? '' : openCommentBoxes.has(key) ? `
+  // Add comment sits at the top (3.3.1), so a new comment lands right under it as the newest entry.
+  const boxOpen = EDITOR && openCommentBoxes.has(key);
+  const link = EDITOR && !boxOpen
+    ? `<button class="text-link add-comment" type="button" onclick="openCommentBox(${args})">${ICON.plus}<span>Add comment${commentDrafts[key] ? ' <span class="muted">(unsent draft)</span>' : ''}</span></button>` : '';
+  const form = !boxOpen ? '' : `
       <div class="comment-add">
         <textarea id="cmt-${a.id}" aria-label="Add a comment" placeholder="Add a comment" oninput="commentDrafts['${key}'] = this.value; document.getElementById('cmt-err-${a.id}').style.display = 'none';" onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){ event.preventDefault(); addComment(${args}); }">${escapeHtml(commentDrafts[key] || '')}</textarea>
         <div class="comment-add-btns"><button class="btn-primary" type="button" onclick="addComment(${args})">Add</button><button type="button" onclick="cancelCommentBox(${args})">Cancel</button></div>
       </div>
       ${note}
-      <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>`
-    : `<button class="text-link add-comment" type="button" onclick="openCommentBox(${args})">${ICON.plus}<span>Add comment${commentDrafts[key] ? ' <span class="muted">(unsent draft)</span>' : ''}</span></button>`;
-  return `<div class="act-list"><div class="act-head">Activity</div>${rows || '<div class="entry-empty">Nothing yet</div>'}</div>${form}`;
+      <div class="comment-err" id="cmt-err-${a.id}" style="display:none;">Enter a comment first.</div>
+      <div class="comment-gap"></div>`;
+  return `<div class="act-list"><div class="act-head-row"><span class="act-head">Activity</span>${link}</div>${form}${rows || '<div class="entry-empty">Nothing yet</div>'}</div>`;
 }
 
 function taskDueCell(a){
@@ -619,8 +672,9 @@ function renderTasksSection(ctx){
   const any = tasksAnyOpen(ctx);
   const toggle = groups.length ? `<button class="act-toggle-all" type="button" onclick="toggleAllTasks('${ctx.id}')">${any ? ICON.collapseAll : ICON.expandAll}<span>${any ? 'Collapse all' : 'Expand all'}</span></button>` : '';
   const cols = `<colgroup><col class="tw-chev"><col class="tw-ref"><col><col class="tw-due"><col class="tw-cm">${EDITOR ? '<col class="tw-act">' : ''}</colgroup>`;
-  const head = `<thead><tr><th></th><th>Ref</th><th>Task</th><th>Due / status</th><th title="Comments">${ICON.comment}</th>${EDITOR ? '<th></th>' : ''}</tr></thead>`;
+  const headFor = status => `<thead><tr><th></th>${taskSortHead(status, 'ref')}${taskSortHead(status, 'title')}${taskSortHead(status, 'due')}<th title="Comments">${ICON.comment}</th>${EDITOR ? '<th></th>' : ''}</tr></thead>`;
   const body = groups.length ? groups.map(g => {
+    const head = headFor(g.status);
     const done = g.status === 'Complete';
     const n = g.items.length;
     const overdue = done ? 0 : g.items.filter(x => isTaskOverdue(x.item)).length;

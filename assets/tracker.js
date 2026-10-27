@@ -5,7 +5,7 @@
 // Each page sets window.TRACKER_EDITOR (editor only) and its own GitHub connection, then calls load().
 // =====================================================================
 const EDITOR = !!window.TRACKER_EDITOR;
-const VERSION = 'v3.3.0';
+const VERSION = 'v3.3.1';
 
 // v3: all data (projects, library, regulatory PDFs and search indexes) lives in a private repo.
 // Every reader needs a key: viewers a read-only key, the editor a read-and-write key.
